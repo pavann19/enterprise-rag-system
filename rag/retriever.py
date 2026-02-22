@@ -1,10 +1,18 @@
 """
 rag/retriever.py
 ----------------
-Ranks text chunks by semantic similarity to a query embedding.
+Lightweight, air-gapped implementation designed for deterministic enterprise workflows.
 
-Retrieval is the only responsibility of this module.
-It receives pre-computed embeddings — it does NOT call Ollama.
+Implements an in-memory vector computation layer for zero-latency local prototyping.
+Cosine similarity is computed over a dense NumPy float32 corpus array, providing
+exact nearest-neighbour retrieval with no approximation error — ideal for
+air-gapped deployments where deterministic behaviour is a hard requirement.
+
+Retrieval is the sole responsibility of this module.
+It receives pre-computed embeddings — it does NOT call Ollama or any external service.
+
+Scale-out path: replace the NumPy backend with FAISS or Qdrant behind the same
+`retrieve()` interface without modifying any downstream pipeline code.
 """
 
 from typing import List, Tuple

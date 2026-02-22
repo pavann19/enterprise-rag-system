@@ -1,7 +1,15 @@
 """
 rag/chunker.py
 --------------
-Splits raw text into overlapping chunks suitable for embedding.
+Lightweight, air-gapped document segmentation layer designed for
+deterministic enterprise workflows.
+
+Segments unstructured input into overlapping, word-boundary-aligned chunks
+that preserve cross-boundary semantic context for downstream embedding and
+retrieval. Chunk size and overlap are fully configurable to match the
+context-window constraints of any Ollama embedding model.
+
+No external calls — operates entirely on local text.
 """
 
 from typing import List

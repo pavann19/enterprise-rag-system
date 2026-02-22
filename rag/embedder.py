@@ -1,11 +1,17 @@
 """
 rag/embedder.py
 ---------------
-Converts text into dense vector embeddings via Ollama's /api/embeddings.
-All inference is local — no external API calls.
+Lightweight, air-gapped vector encoding layer designed for deterministic
+enterprise document indexing workflows.
+
+Converts raw text segments into dense float32 embeddings via Ollama's
+/api/embeddings endpoint. All inference is local — zero external API calls,
+zero data egress. Embeddings are returned as a NumPy array suitable for
+direct ingestion into the in-memory vector computation layer (retriever.py).
 
 Prerequisite:
     ollama pull nomic-embed-text
+    ollama serve
 """
 
 from typing import List

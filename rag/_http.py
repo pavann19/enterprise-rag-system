@@ -1,11 +1,14 @@
 """
 rag/_http.py
 ------------
-Shared HTTP helper for talking to the Ollama REST API.
-Used internally by embedder.py and generator.py.
+Centralized HTTP transport layer for all Ollama API communication.
 
-All public modules call `ollama_post()` rather than duplicating
-urllib boilerplate.
+Provides `ollama_post()` as the single point of control for timeouts,
+error handling, and connection governance across the entire pipeline.
+All public modules delegate Ollama calls here — no urllib boilerplate
+is duplicated in business-logic modules.
+
+Air-gapped by design: all requests are directed to localhost (127.0.0.1).
 """
 
 import json

@@ -1,15 +1,19 @@
 """
 app.py
 ------
-Entry point for the Ollama-powered Enterprise RAG system.
+Orchestration layer for the Enterprise RAG pipeline.
 
-Pipeline (two distinct phases):
+Coordinates two strictly separated execution phases:
 
-  INGESTION  — runs once per knowledge base
-    sample.txt → chunk_text() → embed_texts() → corpus_embeddings
+  INGESTION  — document loading, segmentation, and vector encoding (run once)
+    document → chunk_text() → embed_texts() → corpus_embeddings (np.ndarray)
 
-  QUERY      — runs per user question
-    query → embed_texts() → retrieve() → generate_answer() → validate() → response
+  QUERY      — retrieval, generation, and schema-validated output (run per request)
+    query → embed_texts() → retrieve() → generate_answer() → validate() → RAGResponse
+
+All inference is local via Ollama. The validated output conforms to
+the RAGResponse TypedDict contract, ensuring reliable integration with
+downstream enterprise APIs and audit pipelines.
 """
 
 import json

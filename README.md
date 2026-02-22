@@ -186,3 +186,41 @@ The system is designed to be extended without modifying core pipeline logic:
 | Medium | RAGAS evaluation harness | Faithfulness, answer relevancy, context recall metrics |
 | Low | Streaming token output | Client-side progressive rendering |
 | Low | Cross-encoder re-ranking | Improved passage precision at the cost of additional latency |
+
+---
+
+## 🚀 Key Engineering Decisions
+
+**Air-Gapped Privacy:** Full pipeline execution using local Ollama models. Zero external API calls, guaranteeing data security for sensitive enterprise documentation.
+
+**Deterministic Structured Output:** Rather than returning raw text, the output is passed through `json_validator.py`. It enforces a `RAGResponse` TypedDict schema and raises a `ValidationError` on failure, ensuring reliable integration with downstream enterprise APIs.
+
+**Decoupled Architecture:** Retrieval (`retriever.py`) and Generation (`generator.py`) are strictly independent modules. This allows for isolated unit testing and enables the system to easily swap the lightweight NumPy vector store for FAISS or Pinecone at massive scale.
+
+**Shared HTTP Transport:** A single `_http.py` module handles all Ollama communication, eliminating boilerplate and centralizing timeout and error handling.
+
+---
+
+## 💻 Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **Language** | Python — stdlib-heavy, minimal external dependencies |
+| **AI/LLM Engine** | Ollama (Mistral / Llama3 for generation, Nomic for embeddings) |
+| **Data Storage** | In-Memory Vector Computation (NumPy float32) |
+| **Architecture Patterns** | RAG, Workflow Orchestration, Typed Schema Validation |
+| **UI** | Streamlit (optional browser interface) |
+
+---
+
+## ⚡ Pipeline Execution
+
+**Ingestion:** Documents are parsed and split into overlapping segments to preserve cross-boundary semantic context.
+
+**Embedding:** Chunks are vectorized via `/api/embeddings` and stacked into a dense `np.ndarray` corpus.
+
+**Retrieval:** User queries are embedded with the same model, and cosine similarity ranks the top-k highest-scoring passages from the corpus.
+
+**Generation:** A strict system prompt injects the retrieved context and constrains the model to ground its answer entirely in the provided passages — parametric knowledge is explicitly excluded.
+
+**Validation:** The response is structurally validated against the `RAGResponse` TypedDict schema before being returned to the caller. Any schema violation raises a `ValidationError`, which propagates cleanly to the orchestration layer.

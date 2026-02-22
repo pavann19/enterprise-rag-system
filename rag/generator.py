@@ -1,11 +1,17 @@
 """
 rag/generator.py
 ----------------
-Generates a grounded answer from a query and retrieved context passages
-by calling a local Ollama generation model.
+Lightweight, air-gapped context-grounded generation engine designed for
+deterministic enterprise AI workflows.
 
-Generation is the only responsibility of this module.
-It expects pre-retrieved context — it does NOT perform retrieval.
+Injects top-k retrieved passages into a structured RAG prompt and calls a
+local Ollama generation model to produce an answer grounded strictly in the
+provided context. A strict system instruction prevents the model from drawing
+on parametric knowledge — ensuring answers are attributable, auditable, and
+reproducible from the supplied documents.
+
+Generation is the sole responsibility of this module.
+It expects pre-retrieved context — it does NOT perform retrieval or embedding.
 
 Prerequisite:
     ollama pull mistral    (or: llama3, phi3, gemma, etc.)
