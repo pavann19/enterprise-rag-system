@@ -1,10 +1,8 @@
-# Enterprise RAG System — Air-Gapped Local Edition
+# Enterprise RAG System — FP&A Platform Edition
 
-A modular, privacy-first Retrieval-Augmented Generation (RAG) pipeline designed to extract, synthesize, and enforce structured insights from unstructured data.
+A modular, deterministic Retrieval-Augmented Generation (RAG) pipeline built to power enterprise Financial Planning & Analysis (FP&A) workflows. Designed for seamless backend integration, this system extracts, synthesizes, and enforces structured insights from complex financial documents, policy manuals, and operational reports.
 
-This system runs entirely on local hardware via Ollama, requiring zero cloud APIs or external data transmission. It is engineered for environments where data privacy, offline operation, and deterministic JSON outputs are strict enterprise requirements.
-
-This architecture can be extended to financial planning documents, operational reports, and internal knowledge bases to support structured decision-support systems.
+The pipeline is exposed via a robust FastAPI service layer, enabling tight integration with multi-step agentic AI workflows and internal decision-support systems. It maintains strict standards for deterministic JSON output and data residency, executing securely on local infrastructure.
 
 ---
 
@@ -46,17 +44,18 @@ graph TD
 
 ---
 
-## 🔐 Privacy & Deployment Model
+## 🏢 Enterprise Deployment Model
 
-| Property | Behaviour |
+This system is built for containerized microservice environments. The RAG pipeline is packaged behind a stateless FastAPI service, making it readily consumable by upstream orchestration layers, enterprise dashboards, or multi-step agentic AI frameworks.
+
+| Property | Implementation |
 |---|---|
-| **Data residency** | All documents, embeddings, and model weights remain on-device |
-| **Network calls** | Zero — Ollama binds to `127.0.0.1:11434` (localhost only) |
-| **API keys** | None required |
-| **Air-gap compatible** | Yes — once models are pulled, fully offline operation |
-| **Vector store** | In-memory NumPy array; no external vector DB process required |
+| **Integration** | REST API (`/query`, `/health`) designed for backend-to-backend consumption |
+| **Agentic AI Ready** | Strict `RAGResponse` typing ensures predictable tool usage for autonomous agents |
+| **Data Residency** | Inference runs exclusively on local infrastructure to guarantee financial data privacy |
+| **Vector Storage** | NumPy baseline for prototyping; designed for zero-friction scaling to FAISS or Qdrant |
 
-This architecture is designed for environments where data residency and local execution are strict requirements.
+This architecture bridges the gap between secure local LLM execution and scalable enterprise service patterns.
 
 ---
 
@@ -91,11 +90,11 @@ class RAGResponse(TypedDict):
     model:   str        # Ollama generation model used
 ```
 
-### 3. In-Memory Vector Store for Air-Gapped Privacy
+### 3. Lightweight Prototyping Vector Store
 
-The retrieval corpus is maintained as a `float32` NumPy array computed at startup. This design eliminates the need for a vector database daemon, reduces the attack surface to zero external processes, and allows deterministic retrieval behaviour without index approximation errors.
+The retrieval corpus is maintained as a `float32` NumPy array. This provides a zero-dependency, in-memory backend ideal for rapid prototyping and verifying deterministic retrieval behaviour without index approximation errors.
 
-For scale-out, the corpus array can be persisted with `np.save / np.load` or substituted with a FAISS index behind the same `retrieve()` interface — no downstream code changes required.
+For production scale-out, this prototyping backend provides a clear architectural path to be substituted with a dedicated vector database such as FAISS or Qdrant. Because retrieval logic is isolated behind the `retrieve()` interface, scaling the vector engine requires zero downstream code changes to the generation or validation layers.
 
 ### 4. Single Transport Layer
 
@@ -339,7 +338,7 @@ The system is designed to be extended without modifying core pipeline logic:
 
 ## 🚀 Key Engineering Decisions
 
-**Air-Gapped Privacy:** Full pipeline execution using local Ollama models. Zero external API calls, guaranteeing data security for sensitive enterprise documentation.
+**Data Residency & Security:** Full pipeline execution uses locally hosted Ollama models. This ensures absolute data privacy for sensitive corporate financial documentation, with no external cloud API dependencies.
 
 **Deterministic Structured Output:** Rather than returning raw text, the output is passed through `json_validator.py`. It enforces a `RAGResponse` TypedDict schema and raises a `ValidationError` on failure, ensuring reliable integration with downstream enterprise APIs.
 
