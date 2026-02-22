@@ -1,0 +1,17 @@
+Retrieval-Augmented Generation (RAG) is a technique that enhances large language model (LLM) responses by grounding them in external, retrieved documents rather than relying solely on parametric knowledge baked into the model during training.
+
+A typical RAG pipeline consists of four stages:
+
+1. Ingestion — Raw documents are loaded and split into smaller chunks to fit within the context window of an embedding model. Chunking strategies vary: fixed-size, sentence-level, or semantic chunking are common approaches.
+
+2. Embedding — Each chunk is converted into a dense numerical vector using an embedding model such as Sentence-BERT or OpenAI's text-embedding-ada-002. These vectors capture semantic meaning so that similar texts cluster nearby in vector space.
+
+3. Retrieval — At query time, the user's question is embedded using the same model. Cosine similarity (or approximate nearest-neighbour search via FAISS or Pinecone) is used to rank and return the top-k most relevant chunks from the corpus.
+
+4. Generation — The retrieved chunks are injected into a prompt alongside the original question and passed to an LLM (e.g., GPT-4, Mistral, LLaMA). The model generates a response grounded in the supplied context.
+
+RAG is particularly useful in domains where knowledge changes frequently (e.g., internal documentation, regulatory content) or where hallucination risk must be minimized. By separating the retrieval corpus from the generation model, teams can update the knowledge base without retraining the LLM.
+
+Common production concerns include: chunk overlap tuning, embedding model selection, retrieval latency, context window limits, and response validation to ensure structured outputs conform to downstream schemas.
+
+This sample document is intentionally generic so that the system can be tested end-to-end without requiring proprietary data.
