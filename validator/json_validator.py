@@ -1,97 +1,107 @@
 """
 validator/json_validator.py
 ---------------------------
-Enforces a structured output schema on every RAG pipeline response.
+Lightweight, air-gapped output schema enforcement layer designed for
+deterministic enterprise workflows.
 
-The schema is defined as a TypedDict so it is both runtime-checkable
-and IDE/mypy-visible as a type annotation.
+Defines the canonical RAGResponse TypedDict and validates pipeline output
+against it before returning responses to callers. Raises a typed
+ValidationError on any schema violation — no silent failures.
+
+Each source entry carries both the retrieved text and the originating
+document filename, enabling cross-document attribution and auditability.
 """
 
 import json
-from typing import Any, List, Tuple
+from typing import Any, Dict, List
 
-# ── Output schema ──────────────────────────────────────────────────────────────
+from typing_extensions import TypedDict
 
-# Canonical structure of a validated RAG response.
-# Use this TypedDict as the return-type annotation in callers.
-from typing import TypedDict
+
+# ── Schema definition ──────────────────────────────────────────────────────────
+
+class SourceEntry(TypedDict):
+    """A single retrieved passage with source attribution."""
+    text:   str   # the chunk text returned by the retriever
+    source: str   # originating document filename (e.g. "financial_policy.txt")
 
 
 class RAGResponse(TypedDict):
-    """Structured output produced by the RAG pipeline."""
-    query:   str         # The original user question
-    answer:  str         # The LLM-generated answer
-    sources: List[str]   # Top-k retrieved passages used as context
-    model:   str         # Ollama generation model that produced the answer
+    """Canonical output contract for the Enterprise RAG pipeline."""
+    query:   str              # original user question
+    answer:  str              # LLM-generated, context-grounded answer
+    sources: List[SourceEntry]  # top-k retrieved passages with source metadata
+    model:   str              # Ollama generation model used
 
 
-# Runtime field-level schema (field name → expected Python type)
-_SCHEMA: dict = {
-    "query":   str,
-    "answer":  str,
-    "sources": list,
-    "model":   str,
-}
-
-# ── Validation helpers ─────────────────────────────────────────────────────────
-
+# ── Custom exception ───────────────────────────────────────────────────────────
 
 class ValidationError(ValueError):
-    """Raised when a RAG response fails schema validation."""
+    """Raised when a RAGResponse fails schema validation."""
 
 
-def validate(data: Any) -> RAGResponse:
+# ── Validators ─────────────────────────────────────────────────────────────────
+
+def validate_json_string(raw: str) -> Dict[str, Any]:
     """
-    Validates a dict against the RAGResponse schema and returns it typed.
+    Parses a JSON string and returns the decoded dict.
 
     Args:
-        data: Object to validate (must be a dict).
+        raw: A JSON-encoded string.
 
     Returns:
-        The same dict, typed as RAGResponse.
+        Decoded Python dict.
 
     Raises:
-        ValidationError: With a human-readable message on the first failure.
-    """
-    if not isinstance(data, dict):
-        raise ValidationError(
-            f"Response must be a dict, got {type(data).__name__}."
-        )
-
-    # Check all required fields exist and have the correct type
-    for field, expected_type in _SCHEMA.items():
-        if field not in data:
-            raise ValidationError(f"Missing required field: '{field}'.")
-        if not isinstance(data[field], expected_type):
-            actual = type(data[field]).__name__
-            raise ValidationError(
-                f"Field '{field}' must be {expected_type.__name__}, got {actual}."
-            )
-
-    # Check non-empty string fields
-    for field in ("query", "answer"):
-        if not data[field].strip():
-            raise ValidationError(f"Field '{field}' must not be blank.")
-
-    return data  # type: ignore[return-value]
-
-
-def validate_json_string(json_str: str) -> RAGResponse:
-    """
-    Parses a raw JSON string and validates it as a RAGResponse.
-
-    Args:
-        json_str: Raw JSON string.
-
-    Returns:
-        Parsed and validated RAGResponse dict.
-
-    Raises:
-        ValidationError: If the string is invalid JSON or fails schema checks.
+        ValidationError: If the string is not valid JSON.
     """
     try:
-        data = json.loads(json_str)
+        return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValidationError(f"Invalid JSON: {exc}") from exc
 
-    return validate(data)
+
+def validate(response: Dict[str, Any]) -> RAGResponse:
+    """
+    Validates a dict against the RAGResponse schema.
+
+    Checks:
+      - Required keys are present: query, answer, sources, model
+      - query, answer, model are non-empty strings
+      - sources is a non-empty list of dicts, each with 'text' and 'source' string fields
+
+    Args:
+        response: Dict to validate (typically the raw pipeline output).
+
+    Returns:
+        The same dict cast as a typed RAGResponse.
+
+    Raises:
+        ValidationError: If any field is missing, wrong type, or blank.
+    """
+    required_keys = {"query", "answer", "sources", "model"}
+    missing = required_keys - response.keys()
+    if missing:
+        raise ValidationError(f"RAGResponse missing required keys: {missing}")
+
+    for key in ("query", "answer", "model"):
+        if not isinstance(response[key], str) or not response[key].strip():
+            raise ValidationError(
+                f"RAGResponse field '{key}' must be a non-empty string."
+            )
+
+    if not isinstance(response["sources"], list) or not response["sources"]:
+        raise ValidationError("RAGResponse 'sources' must be a non-empty list.")
+
+    for i, entry in enumerate(response["sources"]):
+        if not isinstance(entry, dict):
+            raise ValidationError(
+                f"RAGResponse sources[{i}] must be a dict, got {type(entry).__name__}."
+            )
+        for field in ("text", "source"):
+            if not isinstance(entry.get(field), str) or not entry[field].strip():
+                raise ValidationError(
+                    f"RAGResponse sources[{i}]['{field}'] must be a non-empty string."
+                )
+
+    return RAGResponse(**response)  # type: ignore[return-value]

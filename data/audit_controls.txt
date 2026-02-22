@@ -1,0 +1,77 @@
+Internal Audit and Financial Controls Manual
+
+Section 1: Purpose
+
+This manual defines the internal audit function, the control environment standards, and the testing procedures applied to financial and operational processes across the organization. It is intended to provide a consistent, documented basis for evaluating control effectiveness, identifying deficiencies, and reporting findings to management and the Audit Committee.
+
+The internal audit function operates independently of the business units it reviews. The Chief Audit Executive reports directly to the Audit Committee of the Board of Directors to preserve independence. Internal audit results are shared with management and tracked through the findings remediation process.
+
+Section 2: Control Framework
+
+The organization's internal control framework is aligned with the Committee of Sponsoring Organizations (COSO) Internal Control framework. The five components of this framework — Control Environment, Risk Assessment, Control Activities, Information and Communication, and Monitoring — are evaluated for design adequacy and operational effectiveness.
+
+Control Environment: Leadership sets the tone for ethical conduct, financial transparency, and accountability. This includes the code of conduct, segregation of duties policies, and the organizational structure that ensures appropriate oversight.
+
+Risk Assessment: Each business unit annually identifies and ranks financial, operational, technology, and compliance risks. High-rated risks are prioritized in the internal audit plan.
+
+Control Activities: Specific policies, procedures, and system-enforced rules that prevent or detect errors and fraud. Examples include multi-level approval workflows, automated three-way matching in accounts payable, and monthly reconciliation requirements.
+
+Information and Communication: Timely, accurate financial reporting to management and the Board. Includes the monthly close process, management reporting packages, and board-level dashboards.
+
+Monitoring: Ongoing assessment of control effectiveness through self-assessments, internal audit reviews, and management reviews of exception reports.
+
+Section 3: Audit Planning
+
+The annual internal audit plan is developed based on the risk assessment conducted by the Chief Audit Executive in consultation with the CFO, CEO, and Audit Committee. High-risk areas receive priority. The plan is reviewed and approved by the Audit Committee at the start of each fiscal year.
+
+Audit engagements are categorized as scheduled (included in the annual plan), responsive (triggered by a specific incident or management request), or advisory (providing consulting support to a business unit designing new controls).
+
+Each engagement begins with a planning phase during which the audit team defines the scope, objectives, key risks, and testing approach. A planning memo is shared with the process owner before fieldwork begins.
+
+Section 4: Control Testing Procedures
+
+Controls are tested using a combination of walkthrough, inquiry, observation, and re-performance procedures.
+
+Walkthrough: The auditor traces a transaction from initiation through completion to verify that controls operate as described. At least one walkthrough is performed per key control.
+
+Inquiry: The auditor interviews process owners and control operators to understand how controls are applied in practice, including exceptions and edge cases.
+
+Observation: For manual controls, the auditor observes the control being performed to verify that it is executed correctly.
+
+Re-performance: The auditor independently re-executes the control procedure (for example, independently reconciling an account) to verify that the control produces the same result.
+
+Sample sizes are determined by control frequency and risk level. High-frequency, high-risk controls typically require samples of 40 to 60 items. Low-frequency controls may be tested on a 100% basis.
+
+Section 5: Deficiency Classification
+
+Control deficiencies identified during testing are classified into three tiers.
+
+Control Deficiency: A shortcoming in the design or operation of a control that, under certain circumstances, could allow an error or fraud to go undetected. Control deficiencies do not, by themselves, suggest that a misstatement has occurred.
+
+Significant Deficiency: A deficiency, or combination of deficiencies, that is important enough to merit attention by those responsible for oversight, but is less severe than a material weakness.
+
+Material Weakness: A deficiency, or combination of deficiencies, that represents a reasonable possibility that a material misstatement of the financial statements would not be prevented or detected on a timely basis. Material weaknesses must be reported immediately to the Audit Committee and the CFO.
+
+Section 6: Findings and Remediation
+
+All findings are documented in a formal audit report. The report includes the finding description, root cause analysis, risk rating, affected processes, and recommended remediation action.
+
+Draft reports are shared with the relevant process owner for management response before finalization. Management must provide an agreed action, a responsible owner, and a committed remediation date for each finding. Disagreements between audit and management on findings are escalated to the Chief Audit Executive and, if unresolved, to the Audit Committee.
+
+Remediation tracking is conducted quarterly. Open findings past their committed date are reported to the CFO and escalated to the Audit Committee if not resolved within 30 days of the due date. Closed findings are verified by the audit team before they are marked complete.
+
+Section 7: Financial Close Controls
+
+The monthly financial close is one of the highest-risk processes from an internal control perspective. Key controls in the close process include account reconciliations, journal entry review, intercompany elimination verification, and management review of period-end balances.
+
+All balance sheet accounts must be reconciled monthly by Finance personnel who do not have posting access to those accounts. Reconciliations must be reviewed and approved by a supervisor within 3 business days of the close. Any unreconciled items above materiality thresholds must be reported to the Controller.
+
+Journal entries posted after the close deadline require a late entry justification and dual approval from the Controller and the relevant business unit head. All journal entry activity is subject to quarterly audit review.
+
+Section 8: Technology and Data Controls
+
+Financial systems must have role-based access controls that restrict users to the functions required for their job. Access is reviewed semi-annually by the system administrators in coordination with Finance Operations and IT Security.
+
+Automated controls embedded in financial systems — such as duplicate payment detection, credit limit enforcement, and budget exhaustion alerts — are tested annually by the internal audit team. Failures of automated controls are treated as control deficiencies and remediated with priority.
+
+Data integrity between source systems and the financial reporting system is validated through monthly reconciliation procedures. Any unexplained differences above the materiality threshold are escalated to IT and Finance for investigation.

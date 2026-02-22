@@ -6,7 +6,8 @@ Orchestration layer for the Enterprise RAG pipeline.
 Coordinates two strictly separated execution phases:
 
   INGESTION  — document loading, segmentation, and vector encoding (run once)
-    document → chunk_text() → embed_texts() → corpus_embeddings (np.ndarray)
+    data/*.txt → chunk_text() → embed_texts() → corpus_embeddings (np.ndarray)
+                                               → chunk metadata list
 
   QUERY      — retrieval, generation, and schema-validated output (run per request)
     query → embed_texts() → retrieve() → generate_answer() → validate() → RAGResponse
@@ -14,11 +15,19 @@ Coordinates two strictly separated execution phases:
 All inference is local via Ollama. The validated output conforms to
 the RAGResponse TypedDict contract, ensuring reliable integration with
 downstream enterprise APIs and audit pipelines.
+
+Multi-document support: the ingestion phase walks the entire data/ directory,
+loads every .txt file, and builds a single unified embedding corpus. Each chunk
+retains its source filename as metadata, enabling cross-document retrieval and
+source attribution in the final structured response.
 """
 
 import json
 import sys
 from pathlib import Path
+from typing import Dict, List, Tuple
+
+import numpy as np
 
 from rag.chunker  import chunk_text
 from rag.embedder import embed_texts
@@ -26,133 +35,160 @@ from rag.retriever import retrieve
 from rag.generator import generate_answer
 from validator.json_validator import validate, ValidationError, RAGResponse
 
-# ── Configuration ──────────────────────────────────────────────────────────────
-DATA_FILE     = Path(__file__).parent / "data" / "sample.txt"
-EMBED_MODEL   = "nomic-embed-text"   # ollama pull nomic-embed-text
-GEN_MODEL     = "mistral"            # ollama pull mistral
-CHUNK_SIZE    = 300                  # characters per chunk (approx.)
-CHUNK_OVERLAP = 50                   # overlap between consecutive chunks
-TOP_K         = 3                    # passages to inject into the prompt
-# ──────────────────────────────────────────────────────────────────────────────
+# ── Configuration ───────────────────────────────────────────────────────────────
+
+DATA_DIR      = Path(__file__).parent / "data"
+EMBED_MODEL   = "nomic-embed-text"
+GEN_MODEL     = "mistral"
+CHUNK_SIZE    = 300
+CHUNK_OVERLAP = 50
+TOP_K         = 3
 
 
-# ── Phase 1: Ingestion ─────────────────────────────────────────────────────────
+# ── Phase 1: Ingestion ──────────────────────────────────────────────────────────
 
-def ingest(embed_model: str = EMBED_MODEL) -> tuple:
+def ingest(
+    data_dir: Path = DATA_DIR,
+    chunk_size: int = CHUNK_SIZE,
+    chunk_overlap: int = CHUNK_OVERLAP,
+    embed_model: str = EMBED_MODEL,
+) -> Tuple[List[str], List[Dict[str, str]], np.ndarray]:
     """
-    Loads and embeds the knowledge base. Returns (chunks, corpus_embeddings).
-
-    This phase is independent of any user query and could be cached
-    or pre-computed in a production system.
+    Walks data_dir, loads every .txt file, chunks each document independently,
+    and encodes all chunks into a unified embedding matrix.
 
     Args:
-        embed_model: Ollama embedding model to use.
+        data_dir:      Directory containing .txt documents.
+        chunk_size:    Approximate character length per chunk.
+        chunk_overlap: Character overlap between consecutive chunks.
+        embed_model:   Ollama embedding model identifier.
 
     Returns:
-        Tuple of (List[str] chunks, np.ndarray corpus_embeddings).
+        chunks (List[str]):            All chunk texts across all documents.
+        metadata (List[Dict[str,str]]): Parallel list; each entry is
+                                         {"source": filename}.
+        corpus_embeddings (np.ndarray): Shape (n_chunks, embedding_dim).
+
+    Raises:
+        FileNotFoundError: If data_dir does not exist or contains no .txt files.
+        ConnectionError:   If Ollama is not reachable.
     """
-    if not DATA_FILE.exists():
-        raise FileNotFoundError(f"Knowledge base not found: {DATA_FILE}")
+    txt_files = sorted(data_dir.glob("*.txt"))
+    if not txt_files:
+        raise FileNotFoundError(
+            f"No .txt files found in {data_dir}. "
+            "Add documents to the data/ directory before running."
+        )
 
-    raw_text = DATA_FILE.read_text(encoding="utf-8")
-    chunks   = chunk_text(raw_text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP)
-    print(f"[ingest]   {len(chunks)} chunks created from {DATA_FILE.name}")
+    all_chunks: List[str]            = []
+    all_metadata: List[Dict[str, str]] = []
 
-    print(f"[ingest]   Embedding with '{embed_model}'…")
-    corpus_embeddings = embed_texts(chunks, model=embed_model)
-    print(f"[ingest]   Corpus shape: {corpus_embeddings.shape}")
+    for filepath in txt_files:
+        text   = filepath.read_text(encoding="utf-8")
+        chunks = chunk_text(text, chunk_size=chunk_size, overlap=chunk_overlap)
+        source = filepath.name
 
-    return chunks, corpus_embeddings
+        all_chunks.extend(chunks)
+        all_metadata.extend({"source": source} for _ in chunks)
+
+        print(f"  [ingest] {source}: {len(chunks)} chunks")
+
+    print(f"  [ingest] Total: {len(all_chunks)} chunks from {len(txt_files)} document(s)")
+
+    corpus_embeddings = embed_texts(all_chunks, model=embed_model)
+    return all_chunks, all_metadata, corpus_embeddings
 
 
-# ── Phase 2: Query ─────────────────────────────────────────────────────────────
+# ── Phase 2: Query pipeline ─────────────────────────────────────────────────────
 
 def query_pipeline(
-    question: str,
-    chunks: list,
-    corpus_embeddings,
+    query: str,
+    chunks: List[str],
+    metadata: List[Dict[str, str]],
+    corpus_embeddings: np.ndarray,
+    gen_model: str   = GEN_MODEL,
     embed_model: str = EMBED_MODEL,
-    gen_model:   str = GEN_MODEL,
-    top_k:       int = TOP_K,
+    top_k: int       = TOP_K,
 ) -> RAGResponse:
     """
-    Runs retrieval + generation for a single question, then validates the output.
+    Encodes the query, retrieves top-k passages with source metadata,
+    generates a context-grounded answer, and validates the structured response.
 
     Args:
-        question:          The user's question.
-        chunks:            Pre-ingested text chunks.
-        corpus_embeddings: Pre-computed chunk embeddings.
-        embed_model:       Ollama model for query embedding.
-        gen_model:         Ollama model for answer generation.
+        query:             User question.
+        chunks:            All chunk texts (from ingest()).
+        metadata:          Parallel metadata list (from ingest()).
+        corpus_embeddings: Precomputed corpus embedding matrix.
+        gen_model:         Ollama generation model identifier.
+        embed_model:       Ollama embedding model identifier.
         top_k:             Number of passages to retrieve.
 
     Returns:
-        Validated RAGResponse dict.
+        A validated RAGResponse TypedDict.
 
     Raises:
-        ValidationError: If the pipeline output fails schema validation.
-        ConnectionError: If Ollama is unreachable.
+        ConnectionError:  If Ollama is unreachable.
+        ValidationError:  If the pipeline output fails schema validation.
     """
-    # Retrieval
-    query_embedding = embed_texts([question], model=embed_model)[0]
-    results         = retrieve(query_embedding, corpus_embeddings, chunks, top_k=top_k)
-    passages        = [chunk for chunk, _ in results]
-    scores          = [round(score, 4) for _, score in results]
-    print(f"[retrieve] Top-{top_k} passages. Scores: {scores}")
+    # 1. Embed query
+    query_embedding = embed_texts([query], model=embed_model)[0]
 
-    # Generation
-    print(f"[generate] Calling '{gen_model}'…")
-    answer = generate_answer(question, passages, model=gen_model)
-    print("[generate] Done.")
-
-    # Structured output + validation
-    response = RAGResponse(
-        query   = question,
-        answer  = answer,
-        sources = passages,
-        model   = gen_model,
+    # 2. Retrieve top-k passages with source metadata
+    results = retrieve(
+        query_embedding   = query_embedding,
+        corpus_embeddings = corpus_embeddings,
+        chunks            = chunks,
+        metadata          = metadata,
+        top_k             = top_k,
     )
-    validated = validate(response)          # raises ValidationError on failure
-    print("[validate] ✓ Schema check passed.")
+    # results: [{"text": str, "score": float, "source": str}, ...]
 
-    return validated
+    passages = [r["text"] for r in results]
+
+    # 3. Generate grounded answer
+    answer = generate_answer(query=query, passages=passages, model=gen_model)
+
+    # 4. Build and validate structured response
+    raw_response = {
+        "query":   query,
+        "answer":  answer,
+        "sources": [{"text": r["text"], "source": r["source"]} for r in results],
+        "model":   gen_model,
+    }
+    return validate(raw_response)
 
 
-# ── CLI entry point ────────────────────────────────────────────────────────────
-
-def main() -> None:
-    question = (
-        sys.argv[1]
-        if len(sys.argv) > 1
-        else "What are the four stages of a RAG pipeline?"
-    )
-
-    print(f"\n{'='*62}")
-    print(f"  Question : {question}")
-    print(f"  Embed    : {EMBED_MODEL}  |  Generate : {GEN_MODEL}")
-    print(f"{'='*62}\n")
-
-    try:
-        chunks, corpus_embeddings = ingest()
-        response = query_pipeline(question, chunks, corpus_embeddings)
-
-    except (ConnectionError, FileNotFoundError) as exc:
-        print(f"\n[ERROR] {exc}", file=sys.stderr)
-        sys.exit(1)
-
-    except ValidationError as exc:
-        print(f"\n[VALIDATION ERROR] {exc}", file=sys.stderr)
-        sys.exit(2)
-
-    # Display results
-    print(f"\n{'─'*62}")
-    print("Answer:")
-    print(response["answer"])
-
-    print(f"\n{'─'*62}")
-    print("Structured Response (JSON):")
-    print(json.dumps(response, indent=2, ensure_ascii=False))
-
+# ── Entry point ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    main()
+    query = (
+        sys.argv[1]
+        if len(sys.argv) > 1
+        else "What is the policy for budget variances exceeding 10%?"
+    )
+
+    print("\n── INGESTION ──────────────────────────────")
+    try:
+        chunks, metadata, corpus_embeddings = ingest()
+    except (FileNotFoundError, ConnectionError) as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print("\n── QUERY ──────────────────────────────────")
+    print(f"  Query: {query}\n")
+
+    try:
+        response = query_pipeline(
+            query             = query,
+            chunks            = chunks,
+            metadata          = metadata,
+            corpus_embeddings = corpus_embeddings,
+        )
+    except ConnectionError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)
+    except ValidationError as exc:
+        print(f"[VALIDATION ERROR] {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    print(json.dumps(response, indent=2))

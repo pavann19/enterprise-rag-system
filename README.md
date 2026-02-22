@@ -116,7 +116,31 @@ python -m streamlit run streamlit_app.py
 
 ---
 
-## 🔄 Pipeline Flow (Step-by-Step)
+## � Multi-Document Corpus Support
+
+The ingestion pipeline automatically scans the `data/` directory and builds a unified embedding corpus across multiple documents. Each chunk retains source-level metadata, enabling:
+
+- **Cross-document retrieval** — a single query searches across all loaded documents simultaneously
+- **Source attribution** — every retrieved passage is annotated with its originating filename
+- **Auditability** — the full `RAGResponse` includes which document each answer was drawn from
+- **Future filtering** — source metadata can be extended to support filtering by document type, date, or classification level
+
+This enables retrieval across heterogeneous enterprise documents such as financial policies, budget reports, and compliance manuals.
+
+### Current Corpus
+
+```
+data/
+├── financial_policy.txt       ← expense authorization, variance policy, procurement rules
+├── budgeting_framework.txt    ← planning calendar, headcount budgeting, scenario planning
+└── audit_controls.txt         ← COSO framework, control testing, findings remediation
+```
+
+To add documents, drop any `.txt` file into `data/` and restart the application. No code changes required.
+
+---
+
+## �🔄 Pipeline Flow (Step-by-Step)
 
 **Phase 1 — Ingestion** *(executed once per knowledge base)*
 

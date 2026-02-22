@@ -1,0 +1,55 @@
+Financial Policy Framework
+
+Section 1: Purpose and Scope
+
+This document defines the financial governance policies applicable to all operating units within the organization. It establishes the principles, rules, and accountability standards that govern how financial resources are requested, approved, allocated, monitored, and reported. These policies apply to all employees, contractors, and third-party vendors who have authority to commit organizational funds.
+
+The purpose of this framework is to ensure that financial decisions are made transparently, that spending is aligned with approved budgets, and that deviations are escalated and resolved through a defined approval chain. This policy does not replace departmental operating procedures but supplements them with organization-wide standards.
+
+Section 2: Expense Authorization
+
+All expenditures must be authorized before commitment. Authorization levels are determined by the dollar value of the expenditure and the seniority of the approving officer.
+
+Tier 1 — Routine Operational Expenses (under $5,000): Authorized by department managers. These are pre-approved categories of spending defined in the annual budget. No additional sign-off is required provided the expense falls within a pre-approved category and does not exceed the monthly departmental allocation.
+
+Tier 2 — Discretionary Spending ($5,000 to $50,000): Requires approval from the department head and sign-off from the Finance Business Partner. All Tier 2 purchases must be submitted via the procurement system with a justification memo attached. Approval must be obtained before any purchase order is issued or contract is signed.
+
+Tier 3 — Capital and Strategic Expenditures (above $50,000): Requires approval from the CFO or designee. The requesting department must submit a Capital Expenditure Request form that includes a cost-benefit analysis, expected ROI, risk assessment, and alignment statement referencing the current strategic plan. Requests are reviewed at the monthly Capital Allocation Committee meeting.
+
+Section 3: Budget Variance Policy
+
+Departments are expected to operate within their approved annual budgets. A positive variance (underspend) is permissible and should be reported at each quarterly review. A negative variance (overspend) requires escalation under the following rules.
+
+Variances up to 5% of the approved quarterly allocation may be self-managed by the department head, provided they are offset by corresponding underspends in other line items within the same department.
+
+Variances between 5% and 10% must be reported to the Finance Business Partner within 5 business days. A remediation plan must be submitted within 15 business days outlining how the overspend will be recovered or how the budget will be formally revised.
+
+Variances exceeding 10% trigger a formal budget review. The department head must present to the CFO within 10 business days. If the overspend is attributable to approved project scope changes, a formal budget amendment request must be filed.
+
+Section 4: Procurement and Vendor Management
+
+All vendor relationships involving financial commitments must go through the approved procurement process. Sole-source or emergency procurements that bypass competitive bidding require written justification and CFO approval. Vendor contracts must be reviewed by Legal before execution.
+
+Payment terms are standardized at Net-30 unless the vendor contract specifies otherwise and has been approved by the CFO and Head of Finance. Early payment discounts may be accepted at the discretion of the Accounts Payable team where the annualized savings exceed the company's cost of capital.
+
+Vendor invoices must match purchase orders within a 2% tolerance. Discrepancies above 2% are flagged for three-way matching review by Accounts Payable before payment is released.
+
+Section 5: Financial Reporting Obligations
+
+All business units must submit monthly actuals to the Finance team by the 5th business day of the following month. These submissions must include a variance commentary for any line item deviating more than 5% from plan. Quarterly forecasts are required by the 10th business day following quarter end.
+
+Annual budget submissions follow the corporate planning calendar. Departmental submissions are due 60 days before fiscal year end. All submissions must use approved templates and must be reviewed and electronically signed by the department head before submission.
+
+Section 6: Internal Controls and Audit Readiness
+
+No single employee may both initiate and approve a financial transaction. Segregation of duties must be maintained across request, approval, and payment functions. System access controls in the financial management platform are reviewed semi-annually by IT Security and Finance Operations.
+
+All financial records must be retained for a minimum of 7 years. Electronic records stored in approved document management systems are acceptable. Physical documents must be stored in secured locations with restricted access.
+
+Departments must be audit-ready at all times. The internal audit function may conduct unannounced spot checks on any department's financial records, procurement documentation, or expense reports.
+
+Section 7: Policy Violations
+
+Violations of this policy may result in disciplinary action up to and including termination, depending on the nature and scale of the violation. Suspected fraud, embezzlement, or intentional policy circumvention must be reported to the Chief Compliance Officer immediately. Reports may be made anonymously through the organizational ethics hotline.
+
+This policy is reviewed annually and updated as required by changes in regulatory requirements, organizational structure, or strategic priorities. The most current version supersedes all prior versions.

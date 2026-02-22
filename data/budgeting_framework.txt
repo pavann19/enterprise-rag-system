@@ -1,0 +1,61 @@
+Budgeting Framework and Planning Methodology
+
+Section 1: Overview
+
+This document defines the enterprise budgeting methodology adopted for annual and multi-year financial planning. The objective of this framework is to produce budgets that are realistic, aligned with strategic priorities, and structured for ongoing monitoring and revision. The framework applies to all cost centers, revenue-generating business units, and shared service functions.
+
+Budgeting at this organization follows a zero-based approach for discretionary spending and an incremental approach for fixed and semi-fixed costs. Capital expenditures are evaluated separately through the Capital Allocation process defined in the Financial Policy Framework document.
+
+Section 2: Planning Calendar
+
+The annual budgeting cycle begins 90 days before the start of the new fiscal year. The following milestones govern the process.
+
+Day 0 (Planning Kickoff): The Finance team distributes planning assumptions to all department heads. Assumptions include projected revenue growth rates, inflation indices, headcount planning parameters, and approved investment priorities from the executive team.
+
+Day 30 (Departmental Submissions Due): Each department submits a draft budget using the standardized budget template. Submissions must include headcount costs by role, direct operating expenses by category, proposed discretionary initiatives with expected business impact, and any capital expenditure requests.
+
+Day 45 (Finance Review): The Finance Business Partner for each department reviews submissions for completeness, accuracy, and alignment with organizational targets. Clarification meetings are scheduled for any submission that requires material revision.
+
+Day 60 (Consolidated View): Finance consolidates all departmental submissions into a company-wide budget model. The consolidated model is reviewed by the CFO and executive leadership team. Gap analysis against revenue targets and profitability thresholds is conducted.
+
+Day 75 (Negotiation and Iteration): Departments receive feedback from the executive review. Budget negotiations address any gaps between submitted requirements and organizational affordability. Trade-offs between departments are managed centrally by the Finance team.
+
+Day 90 (Board Approval): The final proposed budget is presented to the Board of Directors for approval. The approved budget becomes the official operating plan for the new fiscal year.
+
+Section 3: Rolling Forecast
+
+In addition to the annual plan, the organization maintains a rolling 12-month forecast updated quarterly. The rolling forecast reflects changes in business conditions, project status, and strategic priorities that have occurred since the annual plan was approved.
+
+Forecast updates are owned by department heads in collaboration with Finance Business Partners. The forecast is not a re-plan — it does not revise annual targets — but it provides a realistic view of expected performance that is used for cash management, headcount decisions, and resource allocation.
+
+Material changes between the annual plan and the rolling forecast must be explained in variance commentary. Systemic deviations that suggest the annual plan is fundamentally unachievable must be escalated to the CFO for a formal mid-year reforecast.
+
+Section 4: Headcount Planning
+
+Headcount is the largest controllable cost for most departments. Headcount plans must distinguish between existing approved positions (rollovers), net new hires, planned attrition replacements, and contractor conversions.
+
+New headcount requests must include a role justification, expected start date, full-year and partial-year cost, and the business outcome the role is intended to support. Headcount requests submitted after Day 30 of the planning cycle must go through an out-of-cycle approval process and require CFO sign-off.
+
+Section 5: Cost Center Accountability
+
+Each cost center has a designated budget owner who is accountable for adhering to the approved plan, reporting actuals on time, explaining variances, and seeking approval for any unplanned spending before it is committed.
+
+Budget ownership cannot be delegated below the manager level. New managers who inherit a cost center are responsible for the budget from the date they assume the role. Transitions between budget owners must be formally communicated to Finance within 5 business days.
+
+Section 6: Budgeting for Technology and AI Investments
+
+Technology and AI investments require special treatment in the budgeting process. Unlike standard operating expenses, AI-related initiatives often carry significant upfront setup costs, ongoing model maintenance obligations, and variable compute costs that are difficult to estimate at planning time.
+
+For AI and automation initiatives, departments are required to submit a Technology Investment Proposal (TIP) alongside their standard budget submission. The TIP must include the problem being solved, the proposed solution architecture, vendor or build decision rationale, expected ROI timeline, and data governance considerations.
+
+AI investments above $25,000 are reviewed by the Technology Investment Committee, which includes representation from Finance, IT, Legal, and the relevant business unit. Approved AI investments are tracked separately in the technology investment portfolio to enable post-implementation review.
+
+Section 7: Scenario Planning
+
+The approved budget represents the base case. Departments are required to also prepare a downside scenario (typically revenue -10% to -15%) and an upside scenario (revenue +10% to +15%). Scenario plans identify which cost lines are variable and can be reduced in a downside environment, and which investment opportunities should be accelerated in an upside environment.
+
+Scenario plans are used by the CFO during board presentations and external reporting to demonstrate management's preparedness for performance variability. Departments that do not submit scenario plans or submit materially incomplete scenarios will be flagged in the audit commentary within the consolidated financial model.
+
+Section 8: Budget Governance
+
+Budget governance is the responsibility of the Finance team in partnership with department heads. Finance has the right to reject submissions that do not comply with prescribed templates or that contain unsupported assumptions. Approved budgets may not be informally revised. Any changes to the approved budget require a formal budget amendment request submitted through the Finance system and approved by the CFO.

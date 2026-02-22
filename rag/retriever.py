@@ -11,11 +11,14 @@ air-gapped deployments where deterministic behaviour is a hard requirement.
 Retrieval is the sole responsibility of this module.
 It receives pre-computed embeddings — it does NOT call Ollama or any external service.
 
+Each result carries source-level metadata (filename), enabling cross-document
+attribution and auditability in the final structured response.
+
 Scale-out path: replace the NumPy backend with FAISS or Qdrant behind the same
 `retrieve()` interface without modifying any downstream pipeline code.
 """
 
-from typing import List, Tuple
+from typing import List, Dict, Tuple
 
 import numpy as np
 
@@ -45,22 +48,27 @@ def retrieve(
     query_embedding: np.ndarray,
     corpus_embeddings: np.ndarray,
     chunks: List[str],
+    metadata: List[Dict[str, str]],
     top_k: int = 3,
-) -> List[Tuple[str, float]]:
+) -> List[Dict[str, object]]:
     """
-    Returns the top-k chunks most semantically similar to the query.
+    Returns the top-k chunks most semantically similar to the query,
+    each annotated with its source document filename and similarity score.
 
     Args:
         query_embedding:   1-D float array for the query.
         corpus_embeddings: 2-D float array, one row per chunk.
         chunks:            Plaintext chunks aligned with corpus_embeddings.
+        metadata:          Parallel list of dicts, one per chunk.
+                           Each dict must contain at least {"source": filename}.
         top_k:             Maximum number of results to return.
 
     Returns:
-        List of (chunk_text, similarity_score) sorted by score descending.
+        List of dicts: [{"text": str, "score": float, "source": str}, ...]
+        Sorted by score descending.
 
     Raises:
-        ValueError: If chunks and embeddings are misaligned or empty.
+        ValueError: If chunks/metadata/embeddings are misaligned or empty.
     """
     if not chunks:
         raise ValueError("chunks must not be empty.")
@@ -69,8 +77,20 @@ def retrieve(
             f"Length mismatch: {len(chunks)} chunks vs "
             f"{len(corpus_embeddings)} embeddings."
         )
+    if len(chunks) != len(metadata):
+        raise ValueError(
+            f"Length mismatch: {len(chunks)} chunks vs "
+            f"{len(metadata)} metadata entries."
+        )
 
-    scores   = _cosine_similarity(query_embedding, corpus_embeddings)
-    top_idx  = np.argsort(scores)[::-1][: min(top_k, len(chunks))]
+    scores  = _cosine_similarity(query_embedding, corpus_embeddings)
+    top_idx = np.argsort(scores)[::-1][: min(top_k, len(chunks))]
 
-    return [(chunks[i], float(scores[i])) for i in top_idx]
+    return [
+        {
+            "text":   chunks[i],
+            "score":  round(float(scores[i]), 4),
+            "source": metadata[i].get("source", "unknown"),
+        }
+        for i in top_idx
+    ]
