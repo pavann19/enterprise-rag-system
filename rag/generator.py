@@ -20,7 +20,10 @@ Prerequisite:
 
 from typing import List
 
-from rag._http import ollama_post
+from rag._http          import ollama_post
+from rag.logging_config import get_logger
+
+log = get_logger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 GENERATE_URL      = "http://localhost:11434/api/generate"
@@ -86,11 +89,21 @@ def generate_answer(
     if not passages:
         raise ValueError("passages must not be empty.")
 
+    log.info("Generating answer — model='%s' query='%.60s…'", model, query)
     prompt   = _build_prompt(query, passages)
-    response = ollama_post(
-        GENERATE_URL,
-        {"model": model, "prompt": prompt, "stream": False},
-    )
+    try:
+        response = ollama_post(
+            GENERATE_URL,
+            {"model": model, "prompt": prompt, "stream": False},
+        )
+        answer = response.get("response", "").strip()
+    except ConnectionError as exc:
+        log.error("Generation failed — Ollama unreachable: %s", exc)
+        raise
 
-    answer = response.get("response", "").strip()
-    return answer or "[The model returned an empty response.]"
+    if not answer:
+        log.warning("Generation returned empty response for model='%s'", model)
+        return "[The model returned an empty response.]"
+
+    log.info("Generation succeeded — answer length %d chars", len(answer))
+    return answer

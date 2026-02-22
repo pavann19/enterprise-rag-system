@@ -36,8 +36,11 @@ from app import (
     CHUNK_OVERLAP,
     TOP_K,
 )
-from rag.ingestion import ingest
+from rag.ingestion      import ingest
+from rag.logging_config import get_logger
 from validator.json_validator import ValidationError
+
+log = get_logger(__name__)
 
 
 # ── Request / Response models ──────────────────────────────────────────────────
@@ -69,7 +72,7 @@ _corpus = _CorpusState()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load the document corpus once at startup; release on shutdown."""
-    print("[startup] Ingesting document corpus…")
+    log.info("Service startup — ingesting document corpus from %s", DATA_DIR)
     try:
         chunks, metadata, embeddings = ingest(
             data_dir      = DATA_DIR,
@@ -82,12 +85,13 @@ async def lifespan(app: FastAPI):
     except ConnectionError as exc:
         raise RuntimeError(f"[startup] Ollama unreachable: {exc}") from exc
 
-    _corpus.chunks    = chunks
-    _corpus.metadata  = metadata
+    _corpus.chunks     = chunks
+    _corpus.metadata   = metadata
     _corpus.embeddings = embeddings
-    print(f"[startup] Corpus ready — {len(chunks)} chunks loaded.")
+    log.info("Corpus ready — %d chunks from %d document(s)",
+             len(chunks), len({m['source'] for m in metadata}))
     yield
-    print("[shutdown] Corpus released.")
+    log.info("Service shutdown — corpus released")
 
 
 # ── FastAPI app ────────────────────────────────────────────────────────────────
@@ -107,12 +111,19 @@ app = FastAPI(
 
 @app.get("/health", tags=["ops"])
 def health_check():
-    """Liveness probe — confirms the service is running and corpus is loaded."""
+    """
+    Liveness probe — confirms the service is running and the corpus is loaded.
+
+    Does NOT trigger embeddings or LLM calls.
+    """
+    documents_loaded = len({m["source"] for m in _corpus.metadata})
+    log.info("Health check — corpus_chunks=%d documents_loaded=%d",
+             len(_corpus.chunks), documents_loaded)
     return {
-        "status":      "ok",
-        "corpus_size": len(_corpus.chunks),
-        "embed_model": EMBED_MODEL,
-        "gen_model":   GEN_MODEL,
+        "status":           "ok",
+        "embedding_model":  EMBED_MODEL,
+        "generation_model": GEN_MODEL,
+        "documents_loaded": documents_loaded,
     }
 
 
@@ -134,6 +145,7 @@ def query(request: QueryRequest):
     if not request.query.strip():
         raise HTTPException(status_code=422, detail="query must not be empty.")
 
+    log.info("POST /query — received query='%.80s…'", request.query)
     try:
         response = query_pipeline(
             query             = request.query,
@@ -145,8 +157,11 @@ def query(request: QueryRequest):
             top_k             = TOP_K,
         )
     except ConnectionError as exc:
+        log.error("POST /query failed — Ollama unreachable: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValidationError as exc:
+        log.error("POST /query failed — validation error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    log.info("POST /query complete — answer length %d chars", len(response["answer"]))
     return response

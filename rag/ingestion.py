@@ -22,8 +22,11 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
-from rag.chunker  import chunk_text
-from rag.embedder import embed_texts
+from rag.chunker         import chunk_text
+from rag.embedder        import embed_texts
+from rag.logging_config  import get_logger
+
+log = get_logger(__name__)
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -59,6 +62,7 @@ def ingest(
         FileNotFoundError: If data_dir does not exist or contains no .txt files.
         ConnectionError:   If the Ollama embedding endpoint is not reachable.
     """
+    log.info("Ingestion started — scanning %s", data_dir)
     txt_files = sorted(Path(data_dir).glob("*.txt"))
     if not txt_files:
         raise FileNotFoundError(
@@ -66,6 +70,7 @@ def ingest(
             "Add documents to the data/ directory before running."
         )
 
+    log.info("Found %d document(s) to ingest", len(txt_files))
     all_chunks:   List[str]             = []
     all_metadata: List[Dict[str, str]]  = []
 
@@ -77,12 +82,17 @@ def ingest(
         all_chunks.extend(chunks)
         all_metadata.extend({"source": source} for _ in chunks)
 
-        print(f"  [ingest] {source}: {len(chunks)} chunks")
+        log.debug("%s → %d chunks", source, len(chunks))
 
-    print(
-        f"  [ingest] Total: {len(all_chunks)} chunks "
-        f"from {len(txt_files)} document(s)"
+    log.info(
+        "Chunking complete — %d total chunks from %d document(s)",
+        len(all_chunks), len(txt_files),
     )
 
+    log.info("Embedding corpus with model '%s' …", embed_model)
     corpus_embeddings = embed_texts(all_chunks, model=embed_model)
+    log.info(
+        "Ingestion complete — corpus shape %s",
+        corpus_embeddings.shape,
+    )
     return all_chunks, all_metadata, corpus_embeddings

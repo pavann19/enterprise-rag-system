@@ -22,6 +22,10 @@ from typing import List, Dict, Tuple
 
 import numpy as np
 
+from rag.logging_config import get_logger
+
+log = get_logger(__name__)
+
 
 # ── Internal helper ────────────────────────────────────────────────────────────
 
@@ -86,7 +90,7 @@ def retrieve(
     scores  = _cosine_similarity(query_embedding, corpus_embeddings)
     top_idx = np.argsort(scores)[::-1][: min(top_k, len(chunks))]
 
-    return [
+    results = [
         {
             "text":   chunks[i],
             "score":  round(float(scores[i]), 4),
@@ -94,3 +98,9 @@ def retrieve(
         }
         for i in top_idx
     ]
+    log.debug(
+        "retrieve() top-%d scores: %s",
+        len(results),
+        ", ".join(f"{r['source']}={r['score']}" for r in results),
+    )
+    return results

@@ -17,6 +17,10 @@ from typing import Any, Dict, List
 
 from typing_extensions import TypedDict
 
+from rag.logging_config import get_logger
+
+log = get_logger(__name__)
+
 
 # ── Schema definition ──────────────────────────────────────────────────────────
 
@@ -82,26 +86,37 @@ def validate(response: Dict[str, Any]) -> RAGResponse:
     required_keys = {"query", "answer", "sources", "model"}
     missing = required_keys - response.keys()
     if missing:
+        log.error("Validation failed — missing keys: %s", missing)
         raise ValidationError(f"RAGResponse missing required keys: {missing}")
 
     for key in ("query", "answer", "model"):
         if not isinstance(response[key], str) or not response[key].strip():
+            log.error("Validation failed — field '%s' is empty or wrong type", key)
             raise ValidationError(
                 f"RAGResponse field '{key}' must be a non-empty string."
             )
 
     if not isinstance(response["sources"], list) or not response["sources"]:
+        log.error("Validation failed — 'sources' is empty or not a list")
         raise ValidationError("RAGResponse 'sources' must be a non-empty list.")
 
     for i, entry in enumerate(response["sources"]):
         if not isinstance(entry, dict):
+            log.error("Validation failed — sources[%d] is not a dict", i)
             raise ValidationError(
                 f"RAGResponse sources[{i}] must be a dict, got {type(entry).__name__}."
             )
         for field in ("text", "source"):
             if not isinstance(entry.get(field), str) or not entry[field].strip():
+                log.error(
+                    "Validation failed — sources[%d]['%s'] missing or empty", i, field
+                )
                 raise ValidationError(
                     f"RAGResponse sources[{i}]['{field}'] must be a non-empty string."
                 )
 
+    log.info(
+        "Validation succeeded — query='%.60s…' sources=%d",
+        response.get("query", ""), len(response["sources"]),
+    )
     return RAGResponse(**response)  # type: ignore[return-value]

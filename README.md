@@ -47,6 +47,7 @@ Each pipeline stage is an independent Python module with a single responsibility
 | Module | Responsibility | External calls |
 |---|---|---|
 | `rag/_http.py` | Shared Ollama HTTP transport | Ollama (localhost) |
+| `rag/logging_config.py` | Centralized logging configuration | None |
 | `rag/ingestion.py` | Multi-document loading, chunking, and embedding | Ollama `/api/embeddings` |
 | `rag/chunker.py` | Word-boundary text segmentation | None |
 | `rag/embedder.py` | Dense vector encoding | Ollama `/api/embeddings` |
@@ -217,7 +218,50 @@ curl -X POST http://localhost:8000/query \
 }
 ```
 
+### Example `/health` response
+
+```json
+{
+  "status": "ok",
+  "embedding_model": "nomic-embed-text",
+  "generation_model": "mistral",
+  "documents_loaded": 3
+}
+```
+
 The corpus is loaded once at server startup. The CLI (`app.py`) and Streamlit UI remain fully independent.
+
+---
+
+## 📝 Structured Logging
+
+All pipeline modules emit structured log lines using Python's built-in `logging` module. No external libraries are used.
+
+Logging is centralised in `rag/logging_config.py`. All loggers share the `rag.*` namespace and write to stdout with a consistent format:
+
+```
+2026-02-22 09:30:01 [INFO    ] rag.ingestion — Ingestion started — scanning data/
+2026-02-22 09:30:01 [INFO    ] rag.ingestion — Found 3 document(s) to ingest
+2026-02-22 09:30:03 [INFO    ] rag.ingestion — Ingestion complete — corpus shape (87, 768)
+2026-02-22 09:30:04 [INFO    ] rag.generator — Generating answer — model='mistral' query='What is th…'
+2026-02-22 09:30:07 [INFO    ] rag.generator — Generation succeeded — answer length 312 chars
+2026-02-22 09:30:07 [INFO    ] validator.json_validator — Validation succeeded — sources=3
+```
+
+| Module | Events logged |
+|---|---|
+| `rag/ingestion.py` | Ingestion start, per-document chunk counts (DEBUG), total counts, embedding completion |
+| `rag/retriever.py` | Top-k scores with source filenames (DEBUG) |
+| `rag/generator.py` | Generation request, success (answer length), Ollama failure (ERROR) |
+| `validator/json_validator.py` | Validation pass/fail with field-level detail (ERROR) |
+| `service/api.py` | Service startup, health check, query received, query complete |
+
+To enable DEBUG output (chunk-level scores, per-file counts):
+
+```python
+import logging
+logging.getLogger("rag").setLevel(logging.DEBUG)
+```
 
 ---
 
