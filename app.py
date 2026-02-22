@@ -5,9 +5,8 @@ Orchestration layer for the Enterprise RAG pipeline.
 
 Coordinates two strictly separated execution phases:
 
-  INGESTION  — document loading, segmentation, and vector encoding (run once)
-    data/*.txt → chunk_text() → embed_texts() → corpus_embeddings (np.ndarray)
-                                               → chunk metadata list
+  INGESTION  — delegated to rag/ingestion.py (run once per knowledge base)
+    data/*.txt → ingest() → (chunks, metadata, corpus_embeddings)
 
   QUERY      — retrieval, generation, and schema-validated output (run per request)
     query → embed_texts() → retrieve() → generate_answer() → validate() → RAGResponse
@@ -15,11 +14,6 @@ Coordinates two strictly separated execution phases:
 All inference is local via Ollama. The validated output conforms to
 the RAGResponse TypedDict contract, ensuring reliable integration with
 downstream enterprise APIs and audit pipelines.
-
-Multi-document support: the ingestion phase walks the entire data/ directory,
-loads every .txt file, and builds a single unified embedding corpus. Each chunk
-retains its source filename as metadata, enabling cross-document retrieval and
-source attribution in the final structured response.
 """
 
 import json
@@ -29,8 +23,8 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
-from rag.chunker  import chunk_text
-from rag.embedder import embed_texts
+from rag.ingestion import ingest
+from rag.embedder  import embed_texts
 from rag.retriever import retrieve
 from rag.generator import generate_answer
 from validator.json_validator import validate, ValidationError, RAGResponse
@@ -45,58 +39,12 @@ CHUNK_OVERLAP = 50
 TOP_K         = 3
 
 
-# ── Phase 1: Ingestion ──────────────────────────────────────────────────────────
-
-def ingest(
-    data_dir: Path = DATA_DIR,
-    chunk_size: int = CHUNK_SIZE,
-    chunk_overlap: int = CHUNK_OVERLAP,
-    embed_model: str = EMBED_MODEL,
-) -> Tuple[List[str], List[Dict[str, str]], np.ndarray]:
-    """
-    Walks data_dir, loads every .txt file, chunks each document independently,
-    and encodes all chunks into a unified embedding matrix.
-
-    Args:
-        data_dir:      Directory containing .txt documents.
-        chunk_size:    Approximate character length per chunk.
-        chunk_overlap: Character overlap between consecutive chunks.
-        embed_model:   Ollama embedding model identifier.
-
-    Returns:
-        chunks (List[str]):            All chunk texts across all documents.
-        metadata (List[Dict[str,str]]): Parallel list; each entry is
-                                         {"source": filename}.
-        corpus_embeddings (np.ndarray): Shape (n_chunks, embedding_dim).
-
-    Raises:
-        FileNotFoundError: If data_dir does not exist or contains no .txt files.
-        ConnectionError:   If Ollama is not reachable.
-    """
-    txt_files = sorted(data_dir.glob("*.txt"))
-    if not txt_files:
-        raise FileNotFoundError(
-            f"No .txt files found in {data_dir}. "
-            "Add documents to the data/ directory before running."
-        )
-
-    all_chunks: List[str]            = []
-    all_metadata: List[Dict[str, str]] = []
-
-    for filepath in txt_files:
-        text   = filepath.read_text(encoding="utf-8")
-        chunks = chunk_text(text, chunk_size=chunk_size, overlap=chunk_overlap)
-        source = filepath.name
-
-        all_chunks.extend(chunks)
-        all_metadata.extend({"source": source} for _ in chunks)
-
-        print(f"  [ingest] {source}: {len(chunks)} chunks")
-
-    print(f"  [ingest] Total: {len(all_chunks)} chunks from {len(txt_files)} document(s)")
-
-    corpus_embeddings = embed_texts(all_chunks, model=embed_model)
-    return all_chunks, all_metadata, corpus_embeddings
+# ── Phase 1: Ingestion — see rag/ingestion.py ────────────────────────────────
+#
+# ingest() is imported directly from rag.ingestion.
+# Call signature:
+#   ingest(data_dir, chunk_size, chunk_overlap, embed_model)
+#      → (chunks, metadata, corpus_embeddings)
 
 
 # ── Phase 2: Query pipeline ─────────────────────────────────────────────────────

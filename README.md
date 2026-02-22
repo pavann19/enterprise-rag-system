@@ -47,6 +47,7 @@ Each pipeline stage is an independent Python module with a single responsibility
 | Module | Responsibility | External calls |
 |---|---|---|
 | `rag/_http.py` | Shared Ollama HTTP transport | Ollama (localhost) |
+| `rag/ingestion.py` | Multi-document loading, chunking, and embedding | Ollama `/api/embeddings` |
 | `rag/chunker.py` | Word-boundary text segmentation | None |
 | `rag/embedder.py` | Dense vector encoding | Ollama `/api/embeddings` |
 | `rag/retriever.py` | Cosine similarity ranking | None |

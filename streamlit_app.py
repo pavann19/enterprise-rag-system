@@ -16,7 +16,8 @@ import streamlit as st
 # Make project root importable
 sys.path.insert(0, str(Path(__file__).parent))
 
-from app import ingest, query_pipeline, DATA_DIR, EMBED_MODEL, GEN_MODEL, TOP_K
+from rag.ingestion import ingest
+from app import query_pipeline, DATA_DIR, EMBED_MODEL, GEN_MODEL, TOP_K
 from validator.json_validator import ValidationError
 
 # ── Page config ────────────────────────────────────────────────────────────────
