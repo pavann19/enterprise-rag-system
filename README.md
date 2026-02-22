@@ -12,14 +12,36 @@ This architecture can be extended to financial planning documents, operational r
 
 ```mermaid
 graph TD
-    A[Unstructured Documents] --> B(chunker.py: Semantic Splitting)
-    B --> C{Ollama: nomic-embed-text}
-    C --> D[(In-Memory Vector Store / Numpy)]
-    E[User Query] --> F{Ollama: Query Embedding}
-    F --> D
-    D -->|Cosine Similarity| G(retriever.py: Top-K Context)
-    G --> H(generator.py: mistral/llama3)
-    H -->|json_validator.py| I[Deterministic RAGResponse TypedDict]
+    subgraph Ingestion ["Phase 1 — Ingestion (once at startup)"]
+        A["data/*.txt"] --> B["rag/ingestion.py\nwalk + chunk + metadata"]
+        B --> C["rag/embedder.py\nOllama nomic-embed-text"]
+        C --> D["In-Memory Corpus\nNumPy float32"]
+    end
+
+    subgraph Query ["Phase 2 — Query (per request)"]
+        E["User Query"] --> F["rag/embedder.py\nQuery embedding"]
+        F --> G["rag/retriever.py\nCosine similarity top-k"]
+        G --> H["rag/generator.py\nOllama mistral"]
+        H --> I["validator/json_validator.py\nRAGResponse schema check"]
+    end
+
+    subgraph ServiceLayer ["Service Layer"]
+        J["GET /health"] --> K["Corpus state\n(no LLM call)"]
+        L["POST /query"] --> F
+        I --> M["RAGResponse JSON"]
+        M --> L
+    end
+
+    subgraph Observability ["Observability"]
+        N["rag/logging_config.py\nCentralized logger"]
+        N -.->|INFO/DEBUG| B
+        N -.->|DEBUG| G
+        N -.->|INFO/ERROR| H
+        N -.->|INFO/ERROR| I
+        N -.->|INFO| L
+    end
+
+    D --> G
 ```
 
 ---
@@ -132,7 +154,7 @@ This enables retrieval across heterogeneous enterprise documents such as financi
 
 ### Current Corpus
 
-```
+```text
 data/
 ├── financial_policy.txt       ← expense authorization, variance policy, procurement rules
 ├── budgeting_framework.txt    ← planning calendar, headcount budgeting, scenario planning
@@ -177,48 +199,25 @@ TOP_K         = 3                    # passages injected into the generation pro
 
 ---
 
-## 🌐 REST API Service
+---
 
-A lightweight FastAPI service layer wraps the pipeline for programmatic access.
+## 🌐 API Usage
 
-```bash
-# Start the API server
-uvicorn service.api:app --host 0.0.0.0 --port 8000
+The FastAPI service wraps the full pipeline behind a REST interface. The corpus is loaded once at startup and held in memory for subsequent requests.
 
-# Interactive docs (auto-generated)
-open http://localhost:8000/docs
-```
-
-### Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/health` | Liveness probe — returns corpus size and active model names |
-| `POST` | `/query` | Run the full RAG pipeline; returns a validated `RAGResponse` |
-
-### Example request
+### Start the server
 
 ```bash
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is the approval threshold for capital expenditures?"}'
+uvicorn service.api:app --reload
+# Available at http://127.0.0.1:8000
+# Interactive docs at http://127.0.0.1:8000/docs
 ```
 
-### Example response
+### Health check
 
-```json
-{
-  "query": "What is the approval threshold for capital expenditures?",
-  "answer": "Capital expenditures above $50,000 require approval from the CFO...",
-  "sources": [
-    {"text": "Tier 3 — Capital and Strategic Expenditures...", "source": "financial_policy.txt"},
-    {"text": "Technology Investment Proposal (TIP)...", "source": "budgeting_framework.txt"}
-  ],
-  "model": "mistral"
-}
+```bash
+curl http://127.0.0.1:8000/health
 ```
-
-### Example `/health` response
 
 ```json
 {
@@ -229,34 +228,68 @@ curl -X POST http://localhost:8000/query \
 }
 ```
 
-The corpus is loaded once at server startup. The CLI (`app.py`) and Streamlit UI remain fully independent.
+The health endpoint does not trigger embeddings or LLM calls. It reads in-memory state only.
+
+### Query
+
+```bash
+curl -X POST http://127.0.0.1:8000/query \
+     -H "Content-Type: application/json" \
+     -d '{"query": "Explain the audit control policy."}'
+```
+
+```json
+{
+  "query": "Explain the audit control policy.",
+  "answer": "The audit control policy is organised around the COSO framework...",
+  "sources": [
+    {"text": "Section 2 — COSO Framework Alignment...", "source": "audit_controls.txt"},
+    {"text": "Tier 3 — Capital and Strategic Expenditures...", "source": "financial_policy.txt"}
+  ],
+  "model": "mistral"
+}
+```
+
+### Error codes
+
+| Code | Condition |
+|---|---|
+| `422` | Empty or malformed request body |
+| `503` | Ollama is unreachable at query time |
+| `500` | Pipeline output failed schema validation |
+
+The CLI (`python app.py`) and Streamlit UI (`streamlit run streamlit_app.py`) remain fully independent of the API server.
 
 ---
 
-## 📝 Structured Logging
+## 🔎 Observability
 
-All pipeline modules emit structured log lines using Python's built-in `logging` module. No external libraries are used.
+All pipeline modules emit structured log lines via Python's built-in `logging` module. No external logging libraries are used.
 
-Logging is centralised in `rag/logging_config.py`. All loggers share the `rag.*` namespace and write to stdout with a consistent format:
+Logging is centralised in `rag/logging_config.py`. Every module calls `get_logger(__name__)` to obtain a child logger under the `rag.*` namespace. All output goes to stdout.
 
-```
-2026-02-22 09:30:01 [INFO    ] rag.ingestion — Ingestion started — scanning data/
-2026-02-22 09:30:01 [INFO    ] rag.ingestion — Found 3 document(s) to ingest
-2026-02-22 09:30:03 [INFO    ] rag.ingestion — Ingestion complete — corpus shape (87, 768)
-2026-02-22 09:30:04 [INFO    ] rag.generator — Generating answer — model='mistral' query='What is th…'
-2026-02-22 09:30:07 [INFO    ] rag.generator — Generation succeeded — answer length 312 chars
-2026-02-22 09:30:07 [INFO    ] validator.json_validator — Validation succeeded — sources=3
+**Log format:**
+
+```text
+YYYY-MM-DD HH:MM:SS [LEVEL   ] logger.name — message
 ```
 
-| Module | Events logged |
-|---|---|
-| `rag/ingestion.py` | Ingestion start, per-document chunk counts (DEBUG), total counts, embedding completion |
-| `rag/retriever.py` | Top-k scores with source filenames (DEBUG) |
-| `rag/generator.py` | Generation request, success (answer length), Ollama failure (ERROR) |
-| `validator/json_validator.py` | Validation pass/fail with field-level detail (ERROR) |
-| `service/api.py` | Service startup, health check, query received, query complete |
+**What is captured:**
 
-To enable DEBUG output (chunk-level scores, per-file counts):
+| Stage | Level | Events |
+|---|---|---|
+| Ingestion | INFO | Start, document count, chunk totals, embedding complete |
+| Ingestion | DEBUG | Per-document chunk counts |
+| Retrieval | DEBUG | Top-k passage scores and source filenames |
+| Generation | INFO | Request (model, query preview), success (answer length) |
+| Generation | ERROR | Ollama connection failure |
+| Validation | INFO | Pass — query preview and source count |
+| Validation | ERROR | Fail — field name and reason |
+| API service | INFO | Startup, `/health` hits, query received, query complete |
+
+**Default level:** `INFO` — sufficient for production monitoring.
+
+**Enable DEBUG** for retrieval scores and per-document chunk counts:
 
 ```python
 import logging
@@ -272,12 +305,11 @@ The system is designed to be extended without modifying core pipeline logic:
 | Extension | How |
 |---|---|
 | **Swap retrieval backend** | Replace `retriever.py` internals with FAISS; `retrieve()` signature unchanged |
-| **Swap embedding model** | Change `EMBED_MODEL` constant; no code changes |
-| **Swap generation model** | Change `GEN_MODEL` constant; no code changes |
-| **Add multi-document ingestion** | Extend `ingest()` in `app.py` to walk a directory |
+| **Swap embedding model** | Change `EMBED_MODEL` constant in `app.py`; no code changes elsewhere |
+| **Swap generation model** | Change `GEN_MODEL` constant in `app.py`; no code changes elsewhere |
 | **Add streaming output** | Pass `"stream": true` to `generator.py`; yield tokens progressively |
 | **Add re-ranking** | Insert a cross-encoder step between `retriever.py` and `generator.py` |
-| **Expose as API** | Wrap `query_pipeline()` with a FastAPI router |
+| **Add PDF support** | Extend `rag/ingestion.py` to call `pypdf` before chunking |
 
 ---
 
@@ -298,8 +330,7 @@ The system is designed to be extended without modifying core pipeline logic:
 |---|---|---|
 | High | Persist corpus embeddings | `np.save / np.load` to eliminate startup re-embedding |
 | High | FAISS index integration | Drop-in via `retrieve()` interface; enables sub-millisecond retrieval at scale |
-| Medium | Multi-document ingestion | Walk `data/` directory; support `.pdf` via `pypdf` |
-| Medium | FastAPI service layer | Expose `query_pipeline()` as a REST endpoint |
+| Medium | PDF ingestion | Extend `rag/ingestion.py` with `pypdf`; no pipeline changes needed |
 | Medium | RAGAS evaluation harness | Faithfulness, answer relevancy, context recall metrics |
 | Low | Streaming token output | Client-side progressive rendering |
 | Low | Cross-encoder re-ranking | Improved passage precision at the cost of additional latency |
