@@ -1,8 +1,4 @@
-# Runtime dependencies (no external APIs)
-numpy>=1.24.0
-
-# requests is only needed if you later switch from urllib to httpx/requests
-# httpx>=0.27.0   # optional — drop-in replacement for urllib in embedder/generator
-
-# Dev / testing (optional)
-# pytest>=8.0.0
+numpy
+fastapi
+uvicorn[standard]
+streamlit

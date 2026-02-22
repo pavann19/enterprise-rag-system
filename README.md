@@ -53,7 +53,8 @@ Each pipeline stage is an independent Python module with a single responsibility
 | `rag/retriever.py` | Cosine similarity ranking | None |
 | `rag/generator.py` | Context-grounded generation | Ollama `/api/generate` |
 | `validator/json_validator.py` | Output schema enforcement | None |
-| `app.py` | Pipeline orchestration | None |
+| `service/api.py` | FastAPI REST service layer | None |
+| `app.py` | Pipeline orchestration (CLI) | None |
 
 ### 2. Deterministic Structured Output
 
@@ -172,6 +173,51 @@ CHUNK_SIZE    = 300                  # approximate characters per chunk
 CHUNK_OVERLAP = 50                   # character overlap between chunks
 TOP_K         = 3                    # passages injected into the generation prompt
 ```
+
+---
+
+## 🌐 REST API Service
+
+A lightweight FastAPI service layer wraps the pipeline for programmatic access.
+
+```bash
+# Start the API server
+uvicorn service.api:app --host 0.0.0.0 --port 8000
+
+# Interactive docs (auto-generated)
+open http://localhost:8000/docs
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness probe — returns corpus size and active model names |
+| `POST` | `/query` | Run the full RAG pipeline; returns a validated `RAGResponse` |
+
+### Example request
+
+```bash
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is the approval threshold for capital expenditures?"}'
+```
+
+### Example response
+
+```json
+{
+  "query": "What is the approval threshold for capital expenditures?",
+  "answer": "Capital expenditures above $50,000 require approval from the CFO...",
+  "sources": [
+    {"text": "Tier 3 — Capital and Strategic Expenditures...", "source": "financial_policy.txt"},
+    {"text": "Technology Investment Proposal (TIP)...", "source": "budgeting_framework.txt"}
+  ],
+  "model": "mistral"
+}
+```
+
+The corpus is loaded once at server startup. The CLI (`app.py`) and Streamlit UI remain fully independent.
 
 ---
 
