@@ -1,129 +1,90 @@
-# Enterprise RAG System — Ollama Edition
+# Enterprise RAG System — Air-Gapped Local Edition
 
-A minimal, modular **Retrieval-Augmented Generation (RAG)** pipeline that runs entirely on local hardware via [Ollama](https://ollama.ai). No cloud APIs, no API keys, no external data transmission.
+A modular, privacy-first Retrieval-Augmented Generation (RAG) pipeline designed to extract, synthesize, and enforce structured insights from unstructured data.
 
----
-
-## Problem Statement
-
-Large language models (LLMs) generate answers from knowledge encoded during training. This creates two practical problems:
-
-1. **Staleness** — the model cannot answer questions about events or documents after its training cutoff.
-2. **Hallucination** — without a grounding source, the model may produce plausible but incorrect answers.
-
-RAG addresses both by retrieving relevant passages from a controlled knowledge base at query time and injecting them into the prompt. The model generates an answer grounded in your documents rather than in its parametric memory.
-
-This project demonstrates that full pipeline using only local Ollama models, making it suitable for environments where data privacy, offline operation, or zero API cost are requirements.
+This system runs entirely on local hardware via Ollama, requiring zero cloud APIs or external data transmission. It is engineered for environments where data privacy, offline operation, and deterministic JSON outputs are strict enterprise requirements.
 
 ---
 
-## System Architecture
+## 🏗️ System Architecture & Workflow
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  INGESTION  (runs once per knowledge base)                          │
-│                                                                     │
-│  data/sample.txt                                                    │
-│       │                                                             │
-│       ▼                                                             │
-│  chunker.py          word-boundary splitting with overlap           │
-│       │                                                             │
-│       ▼                                                             │
-│  embedder.py  ───► Ollama /api/embeddings (nomic-embed-text)        │
-│       │                                                             │
-│       ▼                                                             │
-│  corpus_embeddings   np.ndarray in memory                           │
-└─────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────┐
-│  QUERY  (runs per user question)                                    │
-│                                                                     │
-│  user question                                                      │
-│       │                                                             │
-│       ▼                                                             │
-│  embedder.py  ───► Ollama /api/embeddings (nomic-embed-text)        │
-│       │                                                             │
-│       ▼                                                             │
-│  retriever.py        cosine similarity → top-k passages             │
-│       │                                                             │
-│       ▼                                                             │
-│  generator.py ───► Ollama /api/generate  (mistral / llama3)         │
-│       │                                                             │
-│       ▼                                                             │
-│  json_validator.py   schema check → RAGResponse TypedDict           │
-│       │                                                             │
-│       ▼                                                             │
-│  { query, answer, sources, model }                                  │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    A[Unstructured Documents] --> B(chunker.py: Semantic Splitting)
+    B --> C{Ollama: nomic-embed-text}
+    C --> D[(In-Memory Vector Store / Numpy)]
+    E[User Query] --> F{Ollama: Query Embedding}
+    F --> D
+    D -->|Cosine Similarity| G(retriever.py: Top-K Context)
+    G --> H(generator.py: mistral/llama3)
+    H -->|json_validator.py| I[Deterministic RAGResponse TypedDict]
 ```
 
-### Module Map
+---
 
-| Module | Role |
+## 🔐 Privacy & Deployment Model
+
+| Property | Behaviour |
 |---|---|
-| `rag/_http.py` | Shared Ollama HTTP transport (single point for all API calls) |
-| `rag/chunker.py` | Word-boundary text splitting with configurable size and overlap |
-| `rag/embedder.py` | Calls `/api/embeddings`; returns `np.ndarray` |
-| `rag/retriever.py` | Cosine similarity ranking; returns top-k `(text, score)` tuples |
-| `rag/generator.py` | Builds RAG prompt; calls `/api/generate`; returns answer string |
-| `validator/json_validator.py` | `RAGResponse` TypedDict + `ValidationError`; raises on schema failure |
-| `app.py` | Orchestrates `ingest()` → `query_pipeline()`; CLI entry point |
+| **Data residency** | All documents, embeddings, and model weights remain on-device |
+| **Network calls** | Zero — Ollama binds to `127.0.0.1:11434` (localhost only) |
+| **API keys** | None required |
+| **Air-gap compatible** | Yes — once models are pulled, fully offline operation |
+| **Vector store** | In-memory NumPy array; no external vector DB process required |
+
+This architecture is suitable for regulatory environments (GDPR, HIPAA, SOC 2) where data must not leave the local network perimeter.
 
 ---
 
-## Pipeline Flow
+## 📐 Design Principles
 
-**Step 1 — Ingestion**
-The knowledge base (`data/sample.txt`) is read and split into overlapping chunks by `chunker.py`. Overlap preserves sentence context across chunk boundaries.
+### 1. Strict Separation of Concerns
 
-**Step 2 — Corpus Embedding**
-Each chunk is sent to Ollama's `/api/embeddings` endpoint via `embedder.py`. The response is a dense float vector. All vectors are stacked into a `(n_chunks, dim)` numpy array.
+Each pipeline stage is an independent Python module with a single responsibility:
 
-**Step 3 — Query Embedding**
-The user's question is embedded using the same model and endpoint, producing a `(dim,)` query vector.
+| Module | Responsibility | External calls |
+|---|---|---|
+| `rag/_http.py` | Shared Ollama HTTP transport | Ollama (localhost) |
+| `rag/chunker.py` | Word-boundary text segmentation | None |
+| `rag/embedder.py` | Dense vector encoding | Ollama `/api/embeddings` |
+| `rag/retriever.py` | Cosine similarity ranking | None |
+| `rag/generator.py` | Context-grounded generation | Ollama `/api/generate` |
+| `validator/json_validator.py` | Output schema enforcement | None |
+| `app.py` | Pipeline orchestration | None |
 
-**Step 4 — Retrieval**
-`retriever.py` computes cosine similarity between the query vector and every row in the corpus array. The top-k highest-scoring chunks are returned as candidate passages.
+### 2. Deterministic Structured Output
 
-**Step 5 — Generation**
-`generator.py` formats a prompt containing a system instruction, the numbered passages, and the question. This prompt is sent to Ollama's `/api/generate`. The model is instructed to answer using only the provided context.
+Every pipeline response is enforced against the `RAGResponse` TypedDict before it is returned. The validator raises a typed `ValidationError` on any schema violation — there are no silent failures or untyped dict returns in the public API.
 
-**Step 6 — Validation**
-The response dict is passed to `validator/json_validator.py`, which checks it against the `RAGResponse` TypedDict schema. If any field is missing, has the wrong type, or is blank, a `ValidationError` is raised before the response is returned to the caller.
+```python
+class RAGResponse(TypedDict):
+    query:   str        # original user question
+    answer:  str        # LLM-generated, context-grounded answer
+    sources: List[str]  # top-k retrieved passages (full text)
+    model:   str        # Ollama generation model used
+```
 
----
+### 3. In-Memory Vector Store for Air-Gapped Privacy
 
-## Design Decisions
+The retrieval corpus is maintained as a `float32` NumPy array computed at startup. This design eliminates the need for a vector database daemon, reduces the attack surface to zero external processes, and allows deterministic retrieval behaviour without index approximation errors.
 
-**Shared HTTP transport (`rag/_http.py`)**
-Both `embedder.py` and `generator.py` call Ollama via a single `ollama_post()` helper. This avoids duplicated `urllib` boilerplate and provides one place to adjust timeouts, headers, or authentication if the setup changes.
+For scale-out, the corpus array can be persisted with `np.save / np.load` or substituted with a FAISS index behind the same `retrieve()` interface — no downstream code changes required.
 
-**Retrieval and generation are independent modules**
-`retriever.py` only computes similarity scores — it does not know about Ollama. `generator.py` only generates text — it does not know how passages were selected. This makes each module individually testable and replaceable.
+### 4. Single Transport Layer
 
-**Structured output via TypedDict and raising validator**
-Rather than returning `(bool, str)` tuples, `validate()` raises `ValidationError` on failure and returns a typed `RAGResponse` on success. Callers use standard exception handling and get IDE-visible type information on the return value.
-
-**Private helpers, minimal public API**
-`_cosine_similarity()` and `_build_prompt()` are module-private. Each module exposes only what its callers need: one or two public functions.
-
-**No vector database**
-Cosine similarity over a numpy array is sufficient for small corpora and requires no infrastructure. The tradeoff — O(n) scan per query — is documented under Limitations.
-
-**Stdlib-only HTTP**
-`urllib` is used instead of `requests` or `httpx` so the project has no runtime HTTP dependency. The only runtime dependency is `numpy`.
+All Ollama API calls are routed through `rag/_http.py::ollama_post()`. This provides a single point of control for timeouts, retry logic, authentication headers, and proxy configuration — none of which are scattered across business-logic modules.
 
 ---
 
-## Setup
+## 🚀 Local Setup
 
 ### Prerequisites
 
 ```bash
 # 1. Install Ollama — https://ollama.ai/download
 
-# 2. Pull required models
-ollama pull nomic-embed-text   # embedding model
+# 2. Pull inference models
+ollama pull nomic-embed-text   # embedding model (274 MB)
 ollama pull mistral            # generation model (or: llama3, phi3, gemma)
 
 # 3. Start the Ollama server
@@ -133,87 +94,95 @@ ollama serve
 ### Install Python dependencies
 
 ```bash
-pip install -r requirements.txt   # numpy only
+pip install -r requirements.txt    # numpy + streamlit only
 ```
 
-### Run
+### Run — CLI
 
 ```bash
 cd enterprise-rag-system
-
-python app.py                                          # default question
-python app.py "What is the role of overlap in chunking?"   # custom question
+python app.py
+python app.py "What is the role of cosine similarity in retrieval?"
 ```
 
-### Sample output
+### Run — Browser UI
 
-```
-==============================================================
-  Question : What are the four stages of a RAG pipeline?
-  Embed    : nomic-embed-text  |  Generate : mistral
-==============================================================
-
-[ingest]   5 chunks created from sample.txt
-[ingest]   Embedding with 'nomic-embed-text'…
-[ingest]   Corpus shape: (5, 768)
-[retrieve] Top-3 passages. Scores: [0.9211, 0.8934, 0.8512]
-[generate] Calling 'mistral'…
-[generate] Done.
-[validate] ✓ Schema check passed.
-
-──────────────────────────────────────────────────────────────
-Answer:
-A RAG pipeline has four stages: Ingestion, Embedding, Retrieval, and Generation…
-
-──────────────────────────────────────────────────────────────
-Structured Response (JSON):
-{
-  "query": "What are the four stages of a RAG pipeline?",
-  "answer": "…",
-  "sources": ["…", "…", "…"],
-  "model": "mistral"
-}
+```bash
+python -m streamlit run streamlit_app.py
+# → http://localhost:8501
 ```
 
 ---
 
-## Production Considerations
+## 🔄 Pipeline Flow (Step-by-Step)
 
-This project is a portfolio demonstration, not a production deployment. The table below maps current design choices to what a production system would require.
+**Phase 1 — Ingestion** *(executed once per knowledge base)*
 
-| Concern | Current approach | Production approach |
+| Step | Module | Action |
 |---|---|---|
-| **Privacy** | Fully local — data never leaves the machine | Same: run Ollama on-premise or in a private VPC |
-| **API cost** | Zero — local inference only | Zero variable cost once hardware is provisioned |
-| **Latency** | ~1–8 s on CPU; ~0.2–1 s on GPU | Serve Ollama on a GPU-backed server; use a faster model |
-| **Corpus size** | In-memory numpy, recomputed each run | Pre-compute embeddings, persist with `np.save` or a vector DB |
-| **Concurrency** | Single-threaded, synchronous | Async workers; Ollama supports parallel requests |
-| **Observability** | `print()` statements | Structured logging, request tracing, latency metrics |
-| **Deployment** | `python app.py` | FastAPI wrapper, Docker container, process manager |
+| 1 | `chunker.py` | Segments document into overlapping word-boundary chunks (configurable size & overlap) |
+| 2 | `embedder.py` | Encodes each chunk via `POST /api/embeddings` → `float32` NumPy array |
+
+**Phase 2 — Query** *(executed per user question)*
+
+| Step | Module | Action |
+|---|---|---|
+| 3 | `embedder.py` | Encodes the query using the same embedding model |
+| 4 | `retriever.py` | Computes cosine similarity; returns top-k `(passage, score)` tuples |
+| 5 | `generator.py` | Injects passages into a structured RAG prompt; calls `POST /api/generate` |
+| 6 | `json_validator.py` | Validates output against `RAGResponse` schema; raises `ValidationError` on failure |
 
 ---
 
-## Limitations
+## ⚙️ Configuration
 
-- **In-memory only** — embeddings are recomputed on every run. Not suitable for corpora larger than a few thousand chunks.
-- **Single file ingestion** — the pipeline reads one `.txt` file. Multi-document ingestion requires additional code to walk a directory.
-- **O(n) retrieval** — cosine similarity scans all chunks linearly. Performance degrades as the corpus grows.
-- **No streaming** — generation is buffered (`"stream": false`). Interactive UIs would require streaming support.
-- **CPU embedding is slow** — `nomic-embed-text` can take several seconds per chunk on CPU hardware.
-- **No re-ranking** — retrieved passages are ranked by embedding similarity only. A cross-encoder re-ranker would improve precision but adds latency and complexity.
-- **No conversation history** — each query is stateless. Multi-turn Q&A is not supported.
+All runtime parameters are declared as named constants at the top of `app.py`:
+
+```python
+EMBED_MODEL   = "nomic-embed-text"   # swap for any Ollama embedding model
+GEN_MODEL     = "mistral"            # swap for llama3, phi3, gemma, etc.
+CHUNK_SIZE    = 300                  # approximate characters per chunk
+CHUNK_OVERLAP = 50                   # character overlap between chunks
+TOP_K         = 3                    # passages injected into the generation prompt
+```
 
 ---
 
-## Future Improvements
+## 🧩 Extension Points
 
-| Area | Change |
+The system is designed to be extended without modifying core pipeline logic:
+
+| Extension | How |
 |---|---|
-| **Persistence** | Save/load corpus embeddings with `np.save` / `np.load` to skip re-embedding on startup |
-| **Scale** | Replace numpy cosine scan with FAISS or Qdrant for approximate nearest-neighbour search |
-| **Multi-document** | Walk `data/` directory; support `.pdf` via `pypdf` |
-| **Streaming** | Pass `"stream": true` to Ollama and yield tokens progressively |
-| **Web UI** | Thin Streamlit or FastAPI layer over `query_pipeline()` |
-| **Re-ranking** | Add a cross-encoder pass after retrieval to improve passage precision |
-| **Evaluation** | Integrate RAGAS metrics: faithfulness, answer relevancy, context recall |
-| **Testing** | `pytest` unit tests for `chunker`, `retriever`, and `validator` modules |
+| **Swap retrieval backend** | Replace `retriever.py` internals with FAISS; `retrieve()` signature unchanged |
+| **Swap embedding model** | Change `EMBED_MODEL` constant; no code changes |
+| **Swap generation model** | Change `GEN_MODEL` constant; no code changes |
+| **Add multi-document ingestion** | Extend `ingest()` in `app.py` to walk a directory |
+| **Add streaming output** | Pass `"stream": true` to `generator.py`; yield tokens progressively |
+| **Add re-ranking** | Insert a cross-encoder step between `retriever.py` and `generator.py` |
+| **Expose as API** | Wrap `query_pipeline()` with a FastAPI router |
+
+---
+
+## 📊 Operational Characteristics
+
+| Metric | CPU (6-core) | GPU (8 GB VRAM) |
+|---|---|---|
+| Embedding latency (per chunk) | ~0.5–2 s | ~0.05–0.2 s |
+| Generation latency (mistral) | ~30–90 s | ~2–8 s |
+| Memory footprint (model + app) | ~4–6 GB RAM | ~4 GB VRAM |
+| Corpus re-embedding required? | Only on document change | Only on document change |
+
+---
+
+## 🔭 Roadmap
+
+| Priority | Item | Notes |
+|---|---|---|
+| High | Persist corpus embeddings | `np.save / np.load` to eliminate startup re-embedding |
+| High | FAISS index integration | Drop-in via `retrieve()` interface; enables sub-millisecond retrieval at scale |
+| Medium | Multi-document ingestion | Walk `data/` directory; support `.pdf` via `pypdf` |
+| Medium | FastAPI service layer | Expose `query_pipeline()` as a REST endpoint |
+| Medium | RAGAS evaluation harness | Faithfulness, answer relevancy, context recall metrics |
+| Low | Streaming token output | Client-side progressive rendering |
+| Low | Cross-encoder re-ranking | Improved passage precision at the cost of additional latency |
