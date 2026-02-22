@@ -4,6 +4,8 @@ A modular, privacy-first Retrieval-Augmented Generation (RAG) pipeline designed 
 
 This system runs entirely on local hardware via Ollama, requiring zero cloud APIs or external data transmission. It is engineered for environments where data privacy, offline operation, and deterministic JSON outputs are strict enterprise requirements.
 
+This architecture can be extended to financial planning documents, operational reports, and internal knowledge bases to support structured decision-support systems.
+
 ---
 
 ## 🏗️ System Architecture & Workflow
@@ -32,7 +34,7 @@ graph TD
 | **Air-gap compatible** | Yes — once models are pulled, fully offline operation |
 | **Vector store** | In-memory NumPy array; no external vector DB process required |
 
-This architecture is suitable for regulatory environments (GDPR, HIPAA, SOC 2) where data must not leave the local network perimeter.
+This architecture is designed for environments where data residency and local execution are strict requirements.
 
 ---
 
