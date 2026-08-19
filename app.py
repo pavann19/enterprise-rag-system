@@ -48,10 +48,15 @@ EMBED_BACKEND = os.environ.get("EMBED_BACKEND", "ollama")
 _EMBED_MODEL_DEFAULTS = {"ollama": "nomic-embed-text", "local": "all-MiniLM-L6-v2"}
 EMBED_MODEL = os.environ.get("EMBED_MODEL", _EMBED_MODEL_DEFAULTS.get(EMBED_BACKEND, "nomic-embed-text"))
 
-# Generation: "ollama" (default, local) or "anthropic" (cloud, opt-in only
-# — requires ANTHROPIC_API_KEY — see rag/generator.py for why this exists).
+# Generation: "ollama" (default, local) or "anthropic"/"groq" (cloud,
+# opt-in only — each requires its own API key — see rag/generator.py for
+# why these exist).
 GEN_BACKEND = os.environ.get("GEN_BACKEND", "ollama")
-_GEN_MODEL_DEFAULTS = {"ollama": "mistral", "anthropic": "claude-haiku-4-5-20251001"}
+_GEN_MODEL_DEFAULTS = {
+    "ollama":    "mistral",
+    "anthropic": "claude-haiku-4-5-20251001",
+    "groq":      "llama-3.3-70b-versatile",
+}
 GEN_MODEL = os.environ.get("GEN_MODEL", _GEN_MODEL_DEFAULTS.get(GEN_BACKEND, "mistral"))
 
 

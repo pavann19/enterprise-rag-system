@@ -52,6 +52,8 @@ with st.sidebar:
         st.caption("Ollama must be running locally for the ollama-backed steps above.")
     if GEN_BACKEND == "anthropic":
         st.caption("Generation uses the Claude API — requires ANTHROPIC_API_KEY.")
+    if GEN_BACKEND == "groq":
+        st.caption("Generation uses the Groq API — requires GROQ_API_KEY.")
 
 # ── Corpus loading (cached so it only runs once) ───────────────────────────────
 

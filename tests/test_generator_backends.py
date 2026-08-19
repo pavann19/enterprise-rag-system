@@ -55,3 +55,32 @@ def test_anthropic_backend_raises_clear_error_when_api_key_missing(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
         generate_answer("q", ["ctx"], backend="anthropic")
+
+
+def test_groq_backend_dispatches_with_default_model(monkeypatch):
+    calls = []
+
+    def _fake_backend(prompt, model):
+        calls.append((prompt, model))
+        return "a groq answer"
+
+    monkeypatch.setitem(
+        generator_module._BACKENDS, "groq", (_fake_backend, generator_module.DEFAULT_GROQ_MODEL)
+    )
+
+    answer = generate_answer("what is X?", ["some context"], backend="groq")
+    assert answer == "a groq answer"
+    assert calls[0][1] == generator_module.DEFAULT_GROQ_MODEL
+
+
+def test_groq_backend_raises_clear_error_when_package_missing(monkeypatch):
+    monkeypatch.setitem(sys.modules, "groq", None)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    with pytest.raises(ImportError, match="groq"):
+        generate_answer("q", ["ctx"], backend="groq")
+
+
+def test_groq_backend_raises_clear_error_when_api_key_missing(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
+        generate_answer("q", ["ctx"], backend="groq")

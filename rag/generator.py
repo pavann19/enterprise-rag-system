@@ -1,23 +1,26 @@
 """
 rag/generator.py
 ----------------
-Context-grounded answer generation with two interchangeable backends:
+Context-grounded answer generation with three interchangeable backends:
 
   "ollama"    (default) — calls a local Ollama model. Fully local, no API
                           key, no data leaves the machine. Requires an
                           Ollama server reachable at OLLAMA_HOST.
 
-  "anthropic" (optional) — calls the Claude API. Opt-in only, and requires
-                          the `anthropic` package plus an ANTHROPIC_API_KEY.
-                          This exists for one specific reason: a public
-                          hosted demo (Streamlit Community Cloud, HF
-                          Spaces, etc.) has no way to run a background
-                          Ollama server, so a fully local deployment can't
-                          be reached by someone clicking a link. This
-                          backend trades the air-gapped guarantee for a
-                          working public demo — it is not the default, and
-                          picking it is a deliberate, visible choice (an
-                          env var), never an implicit fallback.
+  "anthropic" (optional) — calls the Claude API. Requires the `anthropic`
+                          package plus an ANTHROPIC_API_KEY.
+
+  "groq"      (optional) — calls Groq's hosted-inference API (Llama models
+                          served on Groq's own chips — free tier, low
+                          latency). Requires the `groq` package plus a
+                          GROQ_API_KEY.
+
+Both cloud backends exist for one specific reason: a public hosted demo
+(Streamlit Community Cloud, HF Spaces, etc.) has no way to run a background
+Ollama server, so a fully local deployment can't be reached by someone
+clicking a link. Either trades the air-gapped guarantee for a working
+public demo — neither is the default, and picking one is a deliberate,
+visible choice (an env var), never an implicit fallback.
 
 Injects top-k retrieved passages into a structured RAG prompt and produces
 an answer grounded strictly in the provided context, via whichever backend
@@ -36,10 +39,11 @@ from rag.logging_config import get_logger
 log = get_logger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-GENERATE_URL           = f"{OLLAMA_HOST}/api/generate"
-DEFAULT_OLLAMA_MODEL   = "mistral"
+GENERATE_URL            = f"{OLLAMA_HOST}/api/generate"
+DEFAULT_OLLAMA_MODEL    = "mistral"
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
-GEN_BACKEND            = os.environ.get("GEN_BACKEND", "ollama")
+DEFAULT_GROQ_MODEL      = "llama-3.3-70b-versatile"
+GEN_BACKEND             = os.environ.get("GEN_BACKEND", "ollama")
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -118,9 +122,38 @@ def _generate_anthropic(prompt: str, model: str) -> str:
     ).strip()
 
 
+def _generate_groq(prompt: str, model: str) -> str:
+    try:
+        import groq
+    except ImportError as exc:
+        raise ImportError(
+            "backend='groq' requires the groq package.\n"
+            "  → pip install groq"
+        ) from exc
+
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "backend='groq' requires the GROQ_API_KEY environment variable."
+        )
+
+    client = groq.Groq(api_key=api_key)
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except groq.APIConnectionError as exc:
+        raise ConnectionError(f"Groq API unreachable: {exc}") from exc
+
+    return (response.choices[0].message.content or "").strip()
+
+
 _BACKENDS = {
     "ollama":    (_generate_ollama, DEFAULT_OLLAMA_MODEL),
     "anthropic": (_generate_anthropic, DEFAULT_ANTHROPIC_MODEL),
+    "groq":      (_generate_groq, DEFAULT_GROQ_MODEL),
 }
 
 
@@ -136,11 +169,11 @@ def generate_answer(
     Args:
         query:    The user's question.
         passages: Top-k retrieved passages (context for the LLM).
-        model:    Model identifier for the chosen backend. Defaults to
-                  DEFAULT_OLLAMA_MODEL or DEFAULT_ANTHROPIC_MODEL depending
-                  on which backend is active.
-        backend:  "ollama" or "anthropic". Defaults to the GEN_BACKEND
-                  environment variable (itself defaulting to "ollama").
+        model:    Model identifier for the chosen backend. Defaults to that
+                  backend's own DEFAULT_*_MODEL constant when None.
+        backend:  "ollama", "anthropic", or "groq". Defaults to the
+                  GEN_BACKEND environment variable (itself defaulting to
+                  "ollama").
 
     Returns:
         The generated answer as a plain string.
@@ -148,9 +181,8 @@ def generate_answer(
     Raises:
         ValueError:      If query is blank, passages is empty, or backend
                           is unrecognized.
-        ImportError:     If backend="anthropic" but the anthropic package
-                          isn't installed.
-        RuntimeError:     If backend="anthropic" but ANTHROPIC_API_KEY is unset.
+        ImportError:     If the selected cloud backend's SDK isn't installed.
+        RuntimeError:    If the selected cloud backend's API key env var is unset.
         ConnectionError: If the selected backend's endpoint is unreachable.
     """
     if not query.strip():

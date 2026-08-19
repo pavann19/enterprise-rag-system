@@ -77,7 +77,7 @@ Each pipeline stage is an independent Python module with a single responsibility
 | `rag/embedder.py` | Dense vector encoding | Ollama `/api/embeddings` (default) or in-process sentence-transformers |
 | `rag/vector_store.py` | Pluggable similarity index (NumPy / FAISS), with save/load | None |
 | `rag/retriever.py` | Translates vector-store hits into chunk text + source metadata | None |
-| `rag/generator.py` | Context-grounded generation | Ollama `/api/generate` (default) or Claude API |
+| `rag/generator.py` | Context-grounded generation | Ollama `/api/generate` (default), Claude API, or Groq API |
 | `validator/json_validator.py` | Output schema enforcement | None |
 | `service/api.py` | FastAPI REST service layer | None |
 | `app.py` | Pipeline orchestration (CLI) | None |
@@ -189,28 +189,32 @@ Streamlit Community Cloud or Hugging Face Spaces don't let you run a
 persistent background server alongside the app, so there's no Ollama for the
 hosted process to talk to.
 
-`rag/embedder.py` and `rag/generator.py` each support one opt-in cloud
-alternative for exactly this case:
+`rag/embedder.py` supports one opt-in cloud alternative for embeddings, and
+`rag/generator.py` supports two for generation — pick whichever fits your
+budget/rate limits:
 
 ```bash
-EMBED_BACKEND=local          # sentence-transformers, runs in-process — no server
+EMBED_BACKEND=local          # sentence-transformers, runs in-process — no server, no API key
 GEN_BACKEND=anthropic        # Claude API — requires ANTHROPIC_API_KEY
+# or
+GEN_BACKEND=groq             # Groq API (Llama models) — requires GROQ_API_KEY, generous free tier
 ```
 
-Both are inert unless explicitly set — the default remains fully local. To
+All are inert unless explicitly set — the default remains fully local. To
 deploy on Streamlit Community Cloud:
 
 1. Push this repo to GitHub (already done if you're reading this from there).
 2. On [share.streamlit.io](https://share.streamlit.io), point a new app at
    `streamlit_app.py`.
-3. In the app's *Secrets*, set:
+3. In the app's *Secrets*, set (pick one generation backend):
    ```toml
    EMBED_BACKEND = "local"
-   GEN_BACKEND = "anthropic"
-   ANTHROPIC_API_KEY = "sk-ant-..."
+   GEN_BACKEND = "groq"
+   GROQ_API_KEY = "gsk_..."
    ```
-4. Add `sentence-transformers` and `anthropic` to `requirements.txt` (they're
-   listed there already, commented out — uncomment them for this deployment).
+4. Add `sentence-transformers` and `groq` (or `anthropic`) to `requirements.txt`
+   — they're listed there already, commented out — uncomment the ones you need
+   for this deployment.
 
 **Not yet done:** no instance of this has actually been deployed from this
 repository — the backend code and its error paths are unit-tested (see
@@ -283,7 +287,7 @@ CACHE_DIR      = Path(...) / ".cache" / "corpus"   # persisted embeddings; delet
 EMBED_BACKEND  = os.environ.get("EMBED_BACKEND", "ollama")   # or "local" (sentence-transformers)
 EMBED_MODEL    = os.environ.get("EMBED_MODEL", ...)           # per-backend default if unset
 
-GEN_BACKEND    = os.environ.get("GEN_BACKEND", "ollama")     # or "anthropic" (Claude API)
+GEN_BACKEND    = os.environ.get("GEN_BACKEND", "ollama")     # or "anthropic"/"groq" (cloud)
 GEN_MODEL      = os.environ.get("GEN_MODEL", ...)             # per-backend default if unset
 ```
 
@@ -292,9 +296,10 @@ GEN_MODEL      = os.environ.get("GEN_MODEL", ...)             # per-backend defa
 | `OLLAMA_HOST` | any URL | `http://localhost:11434` | Where `rag/_http.py` sends Ollama requests — `http://ollama:11434` under docker-compose |
 | `EMBED_BACKEND` | `ollama` \| `local` | `ollama` | `local` runs sentence-transformers in-process, no server needed |
 | `EMBED_MODEL` | model name | backend-specific | `nomic-embed-text` (ollama) / `all-MiniLM-L6-v2` (local) |
-| `GEN_BACKEND` | `ollama` \| `anthropic` | `ollama` | `anthropic` calls the Claude API instead of a local model |
-| `GEN_MODEL` | model name | backend-specific | `mistral` (ollama) / `claude-haiku-4-5-20251001` (anthropic) |
+| `GEN_BACKEND` | `ollama` \| `anthropic` \| `groq` | `ollama` | Cloud backends call their respective hosted API instead of a local model |
+| `GEN_MODEL` | model name | backend-specific | `mistral` (ollama) / `claude-haiku-4-5-20251001` (anthropic) / `llama-3.3-70b-versatile` (groq) |
 | `ANTHROPIC_API_KEY` | API key | — | Required only when `GEN_BACKEND=anthropic` |
+| `GROQ_API_KEY` | API key | — | Required only when `GEN_BACKEND=groq`. **Never write the key itself into a tracked file** — set it as an actual environment variable, a gitignored `.env`, or your host's secrets manager |
 
 ---
 
@@ -482,7 +487,7 @@ The system is designed to be extended without modifying core pipeline logic:
 | ✅ Done | High | Pluggable vector store (NumPy / FAISS) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
 | ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR, hit-rate@k, precision@k against a 15-query golden set. Scoped-down alternative to RAGAS (no LLM judge, no cloud dependency); see `eval/README.md`. **Not yet run** — needs a live Ollama instance |
 | ✅ Done | High | Containerize (Docker) | `Dockerfile` + `docker-compose.yml` — `ollama` + `api` + `ui`, one-shot model pull, persistent volumes |
-| 🟡 Partial | Medium | Hosted demo | `EMBED_BACKEND=local` / `GEN_BACKEND=anthropic` implemented and tested, see [Hosted / Public Demo](#-hosted--public-demo) — actual deployment to Streamlit Cloud/HF Spaces not yet done |
+| 🟡 Partial | Medium | Hosted demo | `EMBED_BACKEND=local` / `GEN_BACKEND=anthropic`\|`groq` implemented and tested, see [Hosted / Public Demo](#-hosted--public-demo) — actual deployment to Streamlit Cloud/HF Spaces not yet done |
 | ⬜ | Medium | Qdrant/Pinecone backend | New `VectorStore` implementation for true horizontal scale beyond FAISS's single-process index |
 | ⬜ | Medium | PDF ingestion | Extend `rag/ingestion.py` with `pypdf`; no pipeline changes needed |
 | ✅ Done | Medium | Integration tests for `service/api.py` / `streamlit_app.py` | FastAPI `TestClient` + Streamlit `AppTest`, ingestion/generation stubbed — see Testing |
@@ -495,7 +500,7 @@ The system is designed to be extended without modifying core pipeline logic:
 
 ## 🚀 Key Engineering Decisions
 
-**Data Residency & Security:** By default, the full pipeline runs on locally hosted Ollama models — no cloud API calls, no data egress. An explicit opt-in path (`EMBED_BACKEND=local`, `GEN_BACKEND=anthropic`) trades that guarantee for public-demo reachability; see [Hosted / Public Demo](#-hosted--public-demo) for exactly what that changes.
+**Data Residency & Security:** By default, the full pipeline runs on locally hosted Ollama models — no cloud API calls, no data egress. An explicit opt-in path (`EMBED_BACKEND=local`, `GEN_BACKEND=anthropic` or `groq`) trades that guarantee for public-demo reachability; see [Hosted / Public Demo](#-hosted--public-demo) for exactly what that changes.
 
 **Deterministic Structured Output:** Rather than returning raw text, the output is passed through `json_validator.py`. It enforces a `RAGResponse` TypedDict schema and raises a `ValidationError` on failure, ensuring reliable integration with downstream enterprise APIs.
 
