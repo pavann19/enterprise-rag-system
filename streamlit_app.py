@@ -22,7 +22,9 @@ from app import (
     DATA_DIR,
     CACHE_DIR,
     EMBED_MODEL,
+    EMBED_BACKEND,
     GEN_MODEL,
+    GEN_BACKEND,
     TOP_K,
     VECTOR_BACKEND,
 )
@@ -31,7 +33,7 @@ from validator.json_validator import ValidationError
 # ── Page config ────────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="Enterprise RAG — Ollama",
+    page_title="Enterprise RAG",
     page_icon="🔍",
     layout="centered",
 )
@@ -40,43 +42,55 @@ st.set_page_config(
 
 with st.sidebar:
     st.header("⚙️ Configuration")
+    st.caption(f"Embedding backend: `{EMBED_BACKEND}`  ·  Generation backend: `{GEN_BACKEND}`")
     embed_model = st.text_input("Embedding model", value=EMBED_MODEL)
     gen_model   = st.text_input("Generation model", value=GEN_MODEL)
     top_k       = st.slider("Top-k passages", min_value=1, max_value=10, value=TOP_K)
     st.markdown("---")
-    st.code("ollama serve", language="bash")
-    st.caption("Ollama must be running locally.")
+    if EMBED_BACKEND == "ollama" or GEN_BACKEND == "ollama":
+        st.code("ollama serve", language="bash")
+        st.caption("Ollama must be running locally for the ollama-backed steps above.")
+    if GEN_BACKEND == "anthropic":
+        st.caption("Generation uses the Claude API — requires ANTHROPIC_API_KEY.")
 
 # ── Corpus loading (cached so it only runs once) ───────────────────────────────
 
 @st.cache_resource(show_spinner="Loading and embedding document corpus…")
-def load_corpus(data_dir: str, embed_model_key: str):
+def load_corpus(data_dir: str, embed_model_key: str, embed_backend_key: str):
     """Ingests all .txt files and returns (chunks, metadata, vector_store)."""
     return ingest(
-        data_dir    = Path(data_dir),
-        embed_model = embed_model_key,
-        backend     = VECTOR_BACKEND,
-        cache_dir   = CACHE_DIR,
+        data_dir      = Path(data_dir),
+        embed_model   = embed_model_key,
+        embed_backend = embed_backend_key,
+        backend       = VECTOR_BACKEND,
+        cache_dir     = CACHE_DIR,
     )
 
 # ── Main UI ────────────────────────────────────────────────────────────────────
 
 st.title("🔍 Enterprise RAG System")
-st.caption("Local Retrieval-Augmented Generation powered by Ollama · No cloud APIs")
+st.caption(f"Retrieval-Augmented Generation · embed={EMBED_BACKEND} · generate={GEN_BACKEND}")
 
-# Load corpus — show friendly error if Ollama is down or data dir is empty
+# Load corpus — show a friendly error if the embedding backend is unreachable
+# or misconfigured, or the data dir is empty
 try:
-    chunks, metadata, vector_store = load_corpus(str(DATA_DIR), embed_model)
+    chunks, metadata, vector_store = load_corpus(str(DATA_DIR), embed_model, EMBED_BACKEND)
 except FileNotFoundError as exc:
     st.error(f"**Data directory error:** {exc}")
     st.stop()
 except ConnectionError as exc:
-    host = str(exc).split("'")[1] if "'" in str(exc) else "http://localhost:11434"
-    st.error(
-        f"**Ollama is not reachable at `{host}`**\n\n"
-        "→ Make sure Ollama is running: `ollama serve`\n\n"
-        f"→ Pull the embedding model: `ollama pull {embed_model}`"
-    )
+    if EMBED_BACKEND == "ollama":
+        host = str(exc).split("'")[1] if "'" in str(exc) else "http://localhost:11434"
+        st.error(
+            f"**Ollama is not reachable at `{host}`**\n\n"
+            "→ Make sure Ollama is running: `ollama serve`\n\n"
+            f"→ Pull the embedding model: `ollama pull {embed_model}`"
+        )
+    else:
+        st.error(f"**Embedding backend unreachable:** {exc}")
+    st.stop()
+except ImportError as exc:
+    st.error(f"**Missing dependency for embed_backend='{EMBED_BACKEND}':** {exc}")
     st.stop()
 
 # Show corpus summary
@@ -99,20 +113,28 @@ if st.button("Ask", type="primary"):
         with st.spinner("Retrieving and generating…"):
             try:
                 response = query_pipeline(
-                    query        = query,
-                    chunks       = chunks,
-                    metadata     = metadata,
-                    vector_store = vector_store,
-                    gen_model    = gen_model,
-                    embed_model  = embed_model,
-                    top_k        = top_k,
+                    query         = query,
+                    chunks        = chunks,
+                    metadata      = metadata,
+                    vector_store  = vector_store,
+                    gen_model     = gen_model,
+                    gen_backend   = GEN_BACKEND,
+                    embed_model   = embed_model,
+                    embed_backend = EMBED_BACKEND,
+                    top_k         = top_k,
                 )
             except ConnectionError as exc:
-                host = str(exc).split("'")[1] if "'" in str(exc) else "http://localhost:11434"
-                st.error(
-                    f"**Ollama is not reachable at `{host}`**\n\n"
-                    f"→ Pull the generation model: `ollama pull {gen_model}`"
-                )
+                if GEN_BACKEND == "ollama":
+                    host = str(exc).split("'")[1] if "'" in str(exc) else "http://localhost:11434"
+                    st.error(
+                        f"**Ollama is not reachable at `{host}`**\n\n"
+                        f"→ Pull the generation model: `ollama pull {gen_model}`"
+                    )
+                else:
+                    st.error(f"**Generation backend unreachable:** {exc}")
+                st.stop()
+            except (ImportError, RuntimeError) as exc:
+                st.error(f"**Generation backend misconfigured:** {exc}")
                 st.stop()
             except ValidationError as exc:
                 st.error(f"**Validation error:** {exc}")

@@ -5,7 +5,7 @@
 
 A modular, deterministic Retrieval-Augmented Generation (RAG) pipeline built to power enterprise Financial Planning & Analysis (FP&A) workflows. Designed for seamless backend integration, this system extracts, synthesizes, and enforces structured insights from complex financial documents, policy manuals, and operational reports.
 
-The pipeline is exposed via a robust FastAPI service layer, enabling tight integration with multi-step agentic AI workflows and internal decision-support systems. It maintains strict standards for deterministic JSON output and data residency, executing securely on local infrastructure.
+The pipeline is exposed via a FastAPI service layer, enabling integration with multi-step agentic AI workflows and internal decision-support systems. Output is schema-validated on every request. Inference runs entirely on local infrastructure (Ollama) by default; an explicit, opt-in cloud path exists for public demo hosting — see [Hosted / Public Demo](#-hosted--public-demo).
 
 ---
 
@@ -55,7 +55,7 @@ This system is built for containerized microservice environments. The RAG pipeli
 |---|---|
 | **Integration** | REST API (`/query`, `/health`) designed for backend-to-backend consumption |
 | **Agentic AI Ready** | Strict `RAGResponse` typing ensures predictable tool usage for autonomous agents |
-| **Data Residency** | Inference runs exclusively on local infrastructure to guarantee financial data privacy |
+| **Data Residency** | Inference runs on local infrastructure by default (`EMBED_BACKEND=ollama`, `GEN_BACKEND=ollama`); switching either to its cloud alternative is a deliberate, explicit config choice — never an implicit fallback |
 | **Vector Storage** | NumPy baseline for prototyping; designed for zero-friction scaling to FAISS or Qdrant |
 
 This architecture bridges the gap between secure local LLM execution and scalable enterprise service patterns.
@@ -74,10 +74,10 @@ Each pipeline stage is an independent Python module with a single responsibility
 | `rag/logging_config.py` | Centralized logging configuration | None |
 | `rag/ingestion.py` | Multi-document loading, chunking, and embedding | Ollama `/api/embeddings` |
 | `rag/chunker.py` | Word-boundary text segmentation | None |
-| `rag/embedder.py` | Dense vector encoding | Ollama `/api/embeddings` |
+| `rag/embedder.py` | Dense vector encoding | Ollama `/api/embeddings` (default) or in-process sentence-transformers |
 | `rag/vector_store.py` | Pluggable similarity index (NumPy / FAISS), with save/load | None |
 | `rag/retriever.py` | Translates vector-store hits into chunk text + source metadata | None |
-| `rag/generator.py` | Context-grounded generation | Ollama `/api/generate` |
+| `rag/generator.py` | Context-grounded generation | Ollama `/api/generate` (default) or Claude API |
 | `validator/json_validator.py` | Output schema enforcement | None |
 | `service/api.py` | FastAPI REST service layer | None |
 | `app.py` | Pipeline orchestration (CLI) | None |
@@ -181,6 +181,47 @@ docker compose down -v       # stop and wipe volumes — next run re-pulls every
 
 ---
 
+## ☁️ Hosted / Public Demo
+
+The default configuration (`EMBED_BACKEND=ollama`, `GEN_BACKEND=ollama`) can't
+be reached by someone clicking a public link — free hosting platforms like
+Streamlit Community Cloud or Hugging Face Spaces don't let you run a
+persistent background server alongside the app, so there's no Ollama for the
+hosted process to talk to.
+
+`rag/embedder.py` and `rag/generator.py` each support one opt-in cloud
+alternative for exactly this case:
+
+```bash
+EMBED_BACKEND=local          # sentence-transformers, runs in-process — no server
+GEN_BACKEND=anthropic        # Claude API — requires ANTHROPIC_API_KEY
+```
+
+Both are inert unless explicitly set — the default remains fully local. To
+deploy on Streamlit Community Cloud:
+
+1. Push this repo to GitHub (already done if you're reading this from there).
+2. On [share.streamlit.io](https://share.streamlit.io), point a new app at
+   `streamlit_app.py`.
+3. In the app's *Secrets*, set:
+   ```toml
+   EMBED_BACKEND = "local"
+   GEN_BACKEND = "anthropic"
+   ANTHROPIC_API_KEY = "sk-ant-..."
+   ```
+4. Add `sentence-transformers` and `anthropic` to `requirements.txt` (they're
+   listed there already, commented out — uncomment them for this deployment).
+
+**Not yet done:** no instance of this has actually been deployed from this
+repository — the backend code and its error paths are unit-tested (see
+`tests/test_embedder_backends.py`, `tests/test_generator_backends.py`), and
+the `local` embedding backend has been run manually end-to-end, but the steps
+above describing the Streamlit Cloud deploy itself have not been executed.
+Deploying requires your own Streamlit Cloud / HF Spaces account and API key,
+so that last step is yours to run.
+
+---
+
 ## 📁 Multi-Document Corpus Support
 
 The ingestion pipeline automatically scans the `data/` directory and builds a unified embedding corpus across multiple documents. Each chunk retains source-level metadata, enabling:
@@ -227,19 +268,33 @@ To add documents, drop any `.txt` file into `data/` and restart the application.
 
 ## ⚙️ Configuration
 
-All runtime parameters are declared as named constants at the top of `app.py`:
+Runtime parameters are declared as named constants at the top of `app.py`. Most
+read an environment variable first and fall back to a local-only default, so
+nothing has to change in code to switch environments — only what's set before
+the process starts:
 
 ```python
-EMBED_MODEL    = "nomic-embed-text"   # swap for any Ollama embedding model
-GEN_MODEL      = "mistral"            # swap for llama3, phi3, gemma, etc.
-CHUNK_SIZE     = 300                  # approximate characters per chunk
-CHUNK_OVERLAP  = 50                   # character overlap between chunks
-TOP_K          = 3                    # passages injected into the generation prompt
-VECTOR_BACKEND = "numpy"              # or "faiss" — see rag/vector_store.py
-CACHE_DIR      = Path(...) / ".cache" / "corpus"  # persisted embeddings; delete to force re-embedding
+CHUNK_SIZE     = 300           # approximate characters per chunk
+CHUNK_OVERLAP  = 50            # character overlap between chunks
+TOP_K          = 3             # passages injected into the generation prompt
+VECTOR_BACKEND = "numpy"       # or "faiss" — see rag/vector_store.py
+CACHE_DIR      = Path(...) / ".cache" / "corpus"   # persisted embeddings; delete to force re-embedding
+
+EMBED_BACKEND  = os.environ.get("EMBED_BACKEND", "ollama")   # or "local" (sentence-transformers)
+EMBED_MODEL    = os.environ.get("EMBED_MODEL", ...)           # per-backend default if unset
+
+GEN_BACKEND    = os.environ.get("GEN_BACKEND", "ollama")     # or "anthropic" (Claude API)
+GEN_MODEL      = os.environ.get("GEN_MODEL", ...)             # per-backend default if unset
 ```
 
----
+| Env var | Values | Default | Effect |
+|---|---|---|---|
+| `OLLAMA_HOST` | any URL | `http://localhost:11434` | Where `rag/_http.py` sends Ollama requests — `http://ollama:11434` under docker-compose |
+| `EMBED_BACKEND` | `ollama` \| `local` | `ollama` | `local` runs sentence-transformers in-process, no server needed |
+| `EMBED_MODEL` | model name | backend-specific | `nomic-embed-text` (ollama) / `all-MiniLM-L6-v2` (local) |
+| `GEN_BACKEND` | `ollama` \| `anthropic` | `ollama` | `anthropic` calls the Claude API instead of a local model |
+| `GEN_MODEL` | model name | backend-specific | `mistral` (ollama) / `claude-haiku-4-5-20251001` (anthropic) |
+| `ANTHROPIC_API_KEY` | API key | — | Required only when `GEN_BACKEND=anthropic` |
 
 ---
 
@@ -408,12 +463,12 @@ The system is designed to be extended without modifying core pipeline logic:
 
 | Status | Priority | Item | Notes |
 |---|---|---|---|
-| ✅ Done | — | Unit tests + CI | `tests/` (60 tests) + `.github/workflows/ci.yml`, see Testing |
+| ✅ Done | — | Unit tests + CI | `tests/` (74 tests) + `.github/workflows/ci.yml`, see Testing |
 | ✅ Done | High | Persist corpus embeddings | `rag/ingestion.py::ingest(cache_dir=...)` — fingerprinted on content + config, skips re-embedding on a cache hit |
 | ✅ Done | High | Pluggable vector store (NumPy / FAISS) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
 | ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR, hit-rate@k, precision@k against a 15-query golden set. Scoped-down alternative to RAGAS (no LLM judge, no cloud dependency); see `eval/README.md`. **Not yet run** — needs a live Ollama instance |
 | ✅ Done | High | Containerize (Docker) | `Dockerfile` + `docker-compose.yml` — `ollama` + `api` + `ui`, one-shot model pull, persistent volumes |
-| ⬜ | Medium | Hosted demo | Deploy Streamlit UI + a cloud-LLM fallback path so reviewers don't need local Ollama |
+| 🟡 Partial | Medium | Hosted demo | `EMBED_BACKEND=local` / `GEN_BACKEND=anthropic` implemented and tested, see [Hosted / Public Demo](#-hosted--public-demo) — actual deployment to Streamlit Cloud/HF Spaces not yet done |
 | ⬜ | Medium | Qdrant/Pinecone backend | New `VectorStore` implementation for true horizontal scale beyond FAISS's single-process index |
 | ⬜ | Medium | PDF ingestion | Extend `rag/ingestion.py` with `pypdf`; no pipeline changes needed |
 | ⬜ | Medium | Integration tests for `service/api.py` / `streamlit_app.py` | `httpx.AsyncClient` + `TestClient` against a mocked Ollama |
@@ -426,7 +481,7 @@ The system is designed to be extended without modifying core pipeline logic:
 
 ## 🚀 Key Engineering Decisions
 
-**Data Residency & Security:** Full pipeline execution uses locally hosted Ollama models. This ensures absolute data privacy for sensitive corporate financial documentation, with no external cloud API dependencies.
+**Data Residency & Security:** By default, the full pipeline runs on locally hosted Ollama models — no cloud API calls, no data egress. An explicit opt-in path (`EMBED_BACKEND=local`, `GEN_BACKEND=anthropic`) trades that guarantee for public-demo reachability; see [Hosted / Public Demo](#-hosted--public-demo) for exactly what that changes.
 
 **Deterministic Structured Output:** Rather than returning raw text, the output is passed through `json_validator.py`. It enforces a `RAGResponse` TypedDict schema and raises a `ValidationError` on failure, ensuring reliable integration with downstream enterprise APIs.
 

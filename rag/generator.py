@@ -1,23 +1,33 @@
 """
 rag/generator.py
 ----------------
-Lightweight, air-gapped context-grounded generation engine designed for
-deterministic enterprise AI workflows.
+Context-grounded answer generation with two interchangeable backends:
 
-Injects top-k retrieved passages into a structured RAG prompt and calls a
-local Ollama generation model to produce an answer grounded strictly in the
-provided context. A strict system instruction prevents the model from drawing
-on parametric knowledge — ensuring answers are attributable, auditable, and
-reproducible from the supplied documents.
+  "ollama"    (default) — calls a local Ollama model. Fully local, no API
+                          key, no data leaves the machine. Requires an
+                          Ollama server reachable at OLLAMA_HOST.
+
+  "anthropic" (optional) — calls the Claude API. Opt-in only, and requires
+                          the `anthropic` package plus an ANTHROPIC_API_KEY.
+                          This exists for one specific reason: a public
+                          hosted demo (Streamlit Community Cloud, HF
+                          Spaces, etc.) has no way to run a background
+                          Ollama server, so a fully local deployment can't
+                          be reached by someone clicking a link. This
+                          backend trades the air-gapped guarantee for a
+                          working public demo — it is not the default, and
+                          picking it is a deliberate, visible choice (an
+                          env var), never an implicit fallback.
+
+Injects top-k retrieved passages into a structured RAG prompt and produces
+an answer grounded strictly in the provided context, via whichever backend
+is selected.
 
 Generation is the sole responsibility of this module.
 It expects pre-retrieved context — it does NOT perform retrieval or embedding.
-
-Prerequisite:
-    ollama pull mistral    (or: llama3, phi3, gemma, etc.)
-    ollama serve
 """
 
+import os
 from typing import List
 
 from rag._http          import OLLAMA_HOST, ollama_post
@@ -26,8 +36,10 @@ from rag.logging_config import get_logger
 log = get_logger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-GENERATE_URL      = f"{OLLAMA_HOST}/api/generate"
-DEFAULT_GEN_MODEL = "mistral"
+GENERATE_URL           = f"{OLLAMA_HOST}/api/generate"
+DEFAULT_OLLAMA_MODEL   = "mistral"
+DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+GEN_BACKEND            = os.environ.get("GEN_BACKEND", "ollama")
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -64,42 +76,98 @@ def _build_prompt(query: str, passages: List[str]) -> str:
     )
 
 
+def _generate_ollama(prompt: str, model: str) -> str:
+    try:
+        response = ollama_post(
+            GENERATE_URL,
+            {"model": model, "prompt": prompt, "stream": False},
+        )
+    except ConnectionError as exc:
+        log.error("Generation failed — Ollama unreachable: %s", exc)
+        raise
+    return response.get("response", "").strip()
+
+
+def _generate_anthropic(prompt: str, model: str) -> str:
+    try:
+        import anthropic
+    except ImportError as exc:
+        raise ImportError(
+            "backend='anthropic' requires the anthropic package.\n"
+            "  → pip install anthropic"
+        ) from exc
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "backend='anthropic' requires the ANTHROPIC_API_KEY environment variable."
+        )
+
+    client = anthropic.Anthropic(api_key=api_key)
+    try:
+        response = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIConnectionError as exc:
+        raise ConnectionError(f"Anthropic API unreachable: {exc}") from exc
+
+    return "".join(
+        block.text for block in response.content if getattr(block, "type", None) == "text"
+    ).strip()
+
+
+_BACKENDS = {
+    "ollama":    (_generate_ollama, DEFAULT_OLLAMA_MODEL),
+    "anthropic": (_generate_anthropic, DEFAULT_ANTHROPIC_MODEL),
+}
+
+
 def generate_answer(
     query: str,
     passages: List[str],
-    model: str = DEFAULT_GEN_MODEL,
+    model: str = None,
+    backend: str = None,
 ) -> str:
     """
-    Calls Ollama to produce a context-grounded answer.
+    Produces a context-grounded answer via the selected backend.
 
     Args:
         query:    The user's question.
         passages: Top-k retrieved passages (context for the LLM).
-        model:    Ollama generation model name.
+        model:    Model identifier for the chosen backend. Defaults to
+                  DEFAULT_OLLAMA_MODEL or DEFAULT_ANTHROPIC_MODEL depending
+                  on which backend is active.
+        backend:  "ollama" or "anthropic". Defaults to the GEN_BACKEND
+                  environment variable (itself defaulting to "ollama").
 
     Returns:
         The generated answer as a plain string.
 
     Raises:
-        ValueError:      If query is blank or passages is empty.
-        ConnectionError: If Ollama is unreachable (propagated from _http).
+        ValueError:      If query is blank, passages is empty, or backend
+                          is unrecognized.
+        ImportError:     If backend="anthropic" but the anthropic package
+                          isn't installed.
+        RuntimeError:     If backend="anthropic" but ANTHROPIC_API_KEY is unset.
+        ConnectionError: If the selected backend's endpoint is unreachable.
     """
     if not query.strip():
         raise ValueError("query must not be empty.")
     if not passages:
         raise ValueError("passages must not be empty.")
 
-    log.info("Generating answer — model='%s' query='%.60s…'", model, query)
-    prompt   = _build_prompt(query, passages)
-    try:
-        response = ollama_post(
-            GENERATE_URL,
-            {"model": model, "prompt": prompt, "stream": False},
-        )
-        answer = response.get("response", "").strip()
-    except ConnectionError as exc:
-        log.error("Generation failed — Ollama unreachable: %s", exc)
-        raise
+    backend = backend or GEN_BACKEND
+    if backend not in _BACKENDS:
+        raise ValueError(f"Unknown generation backend '{backend}'. Available: {sorted(_BACKENDS)}")
+
+    generate_fn, default_model = _BACKENDS[backend]
+    model = model or default_model
+
+    log.info("Generating answer — backend='%s' model='%s' query='%.60s…'", backend, model, query)
+    prompt = _build_prompt(query, passages)
+    answer = generate_fn(prompt, model)
 
     if not answer:
         log.warning("Generation returned empty response for model='%s'", model)

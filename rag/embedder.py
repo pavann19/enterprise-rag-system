@@ -1,67 +1,113 @@
 """
 rag/embedder.py
 ---------------
-Lightweight, air-gapped vector encoding layer designed for deterministic
-enterprise document indexing workflows.
+Vector encoding layer with two interchangeable backends:
 
-Converts raw text segments into dense float32 embeddings via Ollama's
-/api/embeddings endpoint. All inference is local — zero external API calls,
-zero data egress. Embeddings are returned as a NumPy array suitable for
-direct ingestion into the in-memory vector computation layer (retriever.py).
+  "ollama" (default) — calls Ollama's /api/embeddings endpoint. Fully
+                        local, but requires an Ollama server reachable at
+                        OLLAMA_HOST — not available on most free hosting
+                        platforms (Streamlit Community Cloud, HF Spaces),
+                        which don't let you run a persistent background
+                        server alongside the app.
 
-Prerequisite:
-    ollama pull nomic-embed-text
-    ollama serve
+  "local"             — runs sentence-transformers in-process. No server,
+                        no network call, no API key. This is what makes a
+                        hosted public demo possible: the model weights
+                        download once (from Hugging Face, at first use) and
+                        embeddings run on the platform's own CPU.
+
+Select via the EMBED_BACKEND environment variable, or pass backend=
+explicitly to embed_texts(). Both return the same float32 NumPy array
+shape, so nothing downstream (rag/vector_store.py, rag/retriever.py) knows
+or cares which one produced it. Retrieval and generation are independent
+choices — see rag/generator.py for the equivalent split on the generation
+side.
 """
 
+import os
 from typing import List
 
 import numpy as np
 
-from rag._http import OLLAMA_HOST, ollama_post
+from rag._http import ollama_post, OLLAMA_HOST
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-EMBED_URL           = f"{OLLAMA_HOST}/api/embeddings"
-DEFAULT_EMBED_MODEL = "nomic-embed-text"
+EMBED_URL              = f"{OLLAMA_HOST}/api/embeddings"
+DEFAULT_OLLAMA_MODEL   = "nomic-embed-text"
+DEFAULT_LOCAL_MODEL    = "all-MiniLM-L6-v2"
+EMBED_BACKEND          = os.environ.get("EMBED_BACKEND", "ollama")
 # ──────────────────────────────────────────────────────────────────────────────
+
+_local_model_cache: dict = {}
+
+
+def _embed_texts_ollama(texts: List[str], model: str) -> np.ndarray:
+    vectors: List[List[float]] = []
+    for text in texts:
+        response = ollama_post(EMBED_URL, {"model": model, "prompt": text})
+        if "embedding" not in response:
+            raise RuntimeError(
+                f"Ollama embedding response missing 'embedding' key.\nGot: {response}"
+            )
+        vectors.append(response["embedding"])
+    return np.array(vectors, dtype=np.float32)
+
+
+def _embed_texts_local(texts: List[str], model: str) -> np.ndarray:
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise ImportError(
+            "backend='local' requires sentence-transformers.\n"
+            "  → pip install sentence-transformers"
+        ) from exc
+
+    if model not in _local_model_cache:
+        _local_model_cache[model] = SentenceTransformer(model)
+    embeddings = _local_model_cache[model].encode(texts, convert_to_numpy=True)
+    return embeddings.astype(np.float32, copy=False)
+
+
+_BACKENDS = {
+    "ollama": (_embed_texts_ollama, DEFAULT_OLLAMA_MODEL),
+    "local":  (_embed_texts_local, DEFAULT_LOCAL_MODEL),
+}
 
 
 def embed_texts(
     texts: List[str],
-    model: str = DEFAULT_EMBED_MODEL,
+    model: str = None,
+    backend: str = None,
 ) -> np.ndarray:
     """
     Embeds a list of strings into a 2-D float32 numpy array.
 
-    Each string is sent to Ollama individually so that the embedding
-    dimension is inferred from the first response.
-
     Args:
-        texts: Non-empty list of strings to embed.
-        model: Ollama embedding model name.
+        texts:   Non-empty list of strings to embed.
+        model:   Model identifier for the chosen backend. Defaults to
+                 DEFAULT_OLLAMA_MODEL or DEFAULT_LOCAL_MODEL depending on
+                 which backend is active.
+        backend: "ollama" or "local". Defaults to the EMBED_BACKEND
+                 environment variable (itself defaulting to "ollama").
 
     Returns:
-        np.ndarray of shape (len(texts), embedding_dim).
+        np.ndarray of shape (len(texts), embedding_dim). Note: the two
+        backends use different embedding models with different
+        dimensions — a vector store built with one backend is not
+        compatible with the other. Re-ingest after switching backends.
 
     Raises:
-        ValueError:      If `texts` is empty.
-        ConnectionError: If Ollama is unreachable (propagated from _http).
+        ValueError:      If `texts` is empty, or backend is unrecognized.
+        ImportError:     If backend="local" but sentence-transformers isn't installed.
+        ConnectionError: If backend="ollama" and Ollama is unreachable.
         RuntimeError:    If the Ollama response is missing the 'embedding' key.
     """
     if not texts:
         raise ValueError("texts must not be empty.")
 
-    vectors: List[List[float]] = []
+    backend = backend or EMBED_BACKEND
+    if backend not in _BACKENDS:
+        raise ValueError(f"Unknown embed backend '{backend}'. Available: {sorted(_BACKENDS)}")
 
-    for text in texts:
-        response = ollama_post(EMBED_URL, {"model": model, "prompt": text})
-
-        if "embedding" not in response:
-            raise RuntimeError(
-                f"Ollama embedding response missing 'embedding' key.\n"
-                f"Got: {response}"
-            )
-
-        vectors.append(response["embedding"])
-
-    return np.array(vectors, dtype=np.float32)
+    embed_fn, default_model = _BACKENDS[backend]
+    return embed_fn(texts, model or default_model)

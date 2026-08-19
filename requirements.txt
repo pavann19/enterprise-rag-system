@@ -18,6 +18,18 @@ pytest>=8.0.0
 # Uncomment to enable backend="faiss" in app.py / service/api.py / streamlit_app.py:
 # faiss-cpu>=1.8.0
 
+# Optional — EMBED_BACKEND=local (rag/embedder.py). Runs embeddings
+# in-process instead of calling Ollama — needed for hosted demos where a
+# background Ollama server can't run (Streamlit Community Cloud, HF Spaces).
+# Not required for the default EMBED_BACKEND=ollama:
+# sentence-transformers>=3.0.0
+
+# Optional — GEN_BACKEND=anthropic (rag/generator.py). Same hosted-demo
+# motivation as above, for the generation step. Also requires an
+# ANTHROPIC_API_KEY environment variable. Not required for the default
+# GEN_BACKEND=ollama:
+# anthropic>=0.40.0
+
 # Ollama is a separate local install, not a pip package:
 # https://ollama.ai/download
 # ollama pull nomic-embed-text

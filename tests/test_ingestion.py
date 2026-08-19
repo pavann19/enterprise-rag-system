@@ -11,7 +11,7 @@ def fake_embed(monkeypatch):
     keyed on text length, so ingestion tests need no live Ollama instance."""
     calls = {"n": 0}
 
-    def _stub(texts, model="nomic-embed-text"):
+    def _stub(texts, model=None, backend=None):
         calls["n"] += 1
         return np.array([[float(len(t)), 0.0] for t in texts], dtype=np.float32)
 

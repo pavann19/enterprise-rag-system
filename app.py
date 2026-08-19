@@ -12,12 +12,16 @@ Coordinates two strictly separated execution phases:
   QUERY      — retrieval, generation, and schema-validated output (run per request)
     query → embed_texts() → retrieve() → generate_answer() → validate() → RAGResponse
 
-All inference is local via Ollama. The validated output conforms to
-the RAGResponse TypedDict contract, ensuring reliable integration with
+By default, every call is local via Ollama — see rag/embedder.py and
+rag/generator.py for the optional cloud backends (EMBED_BACKEND=local,
+GEN_BACKEND=anthropic) that exist to make a publicly hosted demo possible,
+where a background Ollama server can't run. The validated output conforms
+to the RAGResponse TypedDict contract, ensuring reliable integration with
 downstream enterprise APIs and audit pipelines.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -33,12 +37,22 @@ from validator.json_validator import validate, ValidationError, RAGResponse
 
 DATA_DIR       = Path(__file__).parent / "data"
 CACHE_DIR      = Path(__file__).parent / ".cache" / "corpus"
-EMBED_MODEL    = "nomic-embed-text"
-GEN_MODEL      = "mistral"
 CHUNK_SIZE     = 300
 CHUNK_OVERLAP  = 50
 TOP_K          = 3
 VECTOR_BACKEND = "numpy"   # or "faiss" — see rag/vector_store.py
+
+# Embedding: "ollama" (default, local, needs OLLAMA_HOST reachable) or
+# "local" (sentence-transformers, in-process, no server — hosted demos).
+EMBED_BACKEND = os.environ.get("EMBED_BACKEND", "ollama")
+_EMBED_MODEL_DEFAULTS = {"ollama": "nomic-embed-text", "local": "all-MiniLM-L6-v2"}
+EMBED_MODEL = os.environ.get("EMBED_MODEL", _EMBED_MODEL_DEFAULTS.get(EMBED_BACKEND, "nomic-embed-text"))
+
+# Generation: "ollama" (default, local) or "anthropic" (cloud, opt-in only
+# — requires ANTHROPIC_API_KEY — see rag/generator.py for why this exists).
+GEN_BACKEND = os.environ.get("GEN_BACKEND", "ollama")
+_GEN_MODEL_DEFAULTS = {"ollama": "mistral", "anthropic": "claude-haiku-4-5-20251001"}
+GEN_MODEL = os.environ.get("GEN_MODEL", _GEN_MODEL_DEFAULTS.get(GEN_BACKEND, "mistral"))
 
 
 # ── Phase 1: Ingestion — see rag/ingestion.py ────────────────────────────────
@@ -60,32 +74,36 @@ def query_pipeline(
     chunks: List[str],
     metadata: List[Dict[str, str]],
     vector_store: VectorStore,
-    gen_model: str   = GEN_MODEL,
-    embed_model: str = EMBED_MODEL,
-    top_k: int       = TOP_K,
+    gen_model: str     = GEN_MODEL,
+    gen_backend: str   = GEN_BACKEND,
+    embed_model: str   = EMBED_MODEL,
+    embed_backend: str = EMBED_BACKEND,
+    top_k: int         = TOP_K,
 ) -> RAGResponse:
     """
     Encodes the query, retrieves top-k passages with source metadata,
     generates a context-grounded answer, and validates the structured response.
 
     Args:
-        query:        User question.
-        chunks:       All chunk texts (from ingest()).
-        metadata:     Parallel metadata list (from ingest()).
-        vector_store: Built VectorStore over the corpus embeddings (from ingest()).
-        gen_model:    Ollama generation model identifier.
-        embed_model:  Ollama embedding model identifier.
-        top_k:        Number of passages to retrieve.
+        query:         User question.
+        chunks:        All chunk texts (from ingest()).
+        metadata:      Parallel metadata list (from ingest()).
+        vector_store:  Built VectorStore over the corpus embeddings (from ingest()).
+        gen_model:     Generation model identifier for gen_backend.
+        gen_backend:   "ollama" (default) or "anthropic" — see rag/generator.py.
+        embed_model:   Embedding model identifier for embed_backend.
+        embed_backend: "ollama" (default) or "local" — see rag/embedder.py.
+        top_k:         Number of passages to retrieve.
 
     Returns:
         A validated RAGResponse TypedDict.
 
     Raises:
-        ConnectionError:  If Ollama is unreachable.
+        ConnectionError:  If the selected backend's endpoint is unreachable.
         ValidationError:  If the pipeline output fails schema validation.
     """
     # 1. Embed query
-    query_embedding = embed_texts([query], model=embed_model)[0]
+    query_embedding = embed_texts([query], model=embed_model, backend=embed_backend)[0]
 
     # 2. Retrieve top-k passages with source metadata
     results = retrieve(
@@ -100,7 +118,7 @@ def query_pipeline(
     passages = [r["text"] for r in results]
 
     # 3. Generate grounded answer
-    answer = generate_answer(query=query, passages=passages, model=gen_model)
+    answer = generate_answer(query=query, passages=passages, model=gen_model, backend=gen_backend)
 
     # 4. Build and validate structured response
     raw_response = {
@@ -128,6 +146,7 @@ if __name__ == "__main__":
             chunk_size    = CHUNK_SIZE,
             chunk_overlap = CHUNK_OVERLAP,
             embed_model   = EMBED_MODEL,
+            embed_backend = EMBED_BACKEND,
             backend       = VECTOR_BACKEND,
             cache_dir     = CACHE_DIR,
         )

@@ -2,8 +2,9 @@
 eval/run_eval.py
 -----------------
 Retrieval-quality evaluation harness. Runs every query in golden_set.json
-through the real ingestion + retrieval pipeline (embeddings via Ollama) and
-scores the result against the labeled expected source document.
+through the real ingestion + retrieval pipeline (embeddings via whichever
+EMBED_BACKEND app.py resolves to) and scores the result against the
+labeled expected source document.
 
 This produces the first *measured* number in this repository — everything
 else in the README is either a design decision or an indicative estimate.
@@ -15,10 +16,11 @@ Usage:
     python -m eval.run_eval
     python -m eval.run_eval --k 1 3 5 --backend faiss
 
-Requires a running Ollama instance (embeddings only — no generation call
-is made; this evaluates retrieval, not answer quality). If Ollama is not
-reachable, this exits with a clear error rather than silently reporting
-zero scores.
+Requires the configured embedding backend to be reachable (embeddings
+only — no generation call is made; this evaluates retrieval, not answer
+quality). With the default EMBED_BACKEND="ollama" that means a running
+Ollama instance. If it's not reachable, this exits with a clear error
+rather than silently reporting zero scores.
 """
 
 import argparse
@@ -27,7 +29,15 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app import CACHE_DIR, CHUNK_OVERLAP, CHUNK_SIZE, DATA_DIR, EMBED_MODEL, VECTOR_BACKEND
+from app import (
+    CACHE_DIR,
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    DATA_DIR,
+    EMBED_BACKEND,
+    EMBED_MODEL,
+    VECTOR_BACKEND,
+)
 from eval.metrics import QueryResult, summarize
 from rag.embedder import embed_texts
 from rag.ingestion import ingest
@@ -62,6 +72,7 @@ def run(
         chunk_size    = CHUNK_SIZE,
         chunk_overlap = CHUNK_OVERLAP,
         embed_model   = EMBED_MODEL,
+        embed_backend = EMBED_BACKEND,
         backend       = backend,
         cache_dir     = CACHE_DIR,
     )
@@ -70,7 +81,7 @@ def run(
     query_results = []
 
     for item in golden_queries:
-        query_embedding = embed_texts([item["query"]], model=EMBED_MODEL)[0]
+        query_embedding = embed_texts([item["query"]], model=EMBED_MODEL, backend=EMBED_BACKEND)[0]
         hits = retrieve(
             query_embedding = query_embedding,
             vector_store    = vector_store,
@@ -104,8 +115,9 @@ def run(
 
     return {
         "config": {
-            "data_dir":     str(DATA_DIR),
-            "embed_model":  EMBED_MODEL,
+            "data_dir":      str(DATA_DIR),
+            "embed_backend": EMBED_BACKEND,
+            "embed_model":   EMBED_MODEL,
             "chunk_size":   CHUNK_SIZE,
             "chunk_overlap": CHUNK_OVERLAP,
             "backend":      backend,

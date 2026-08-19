@@ -7,9 +7,9 @@ Exposes a single REST endpoint:
     POST /query   { "query": str }  →  RAGResponse
 
 The corpus is loaded once at server startup via the lifespan context manager
-and held in memory for the lifetime of the process. All inference remains
-local via Ollama — this service adds zero external dependencies beyond the
-existing pipeline modules.
+and held in memory for the lifetime of the process. Inference backend
+(local Ollama vs. optional cloud) is whatever app.py's EMBED_BACKEND /
+GEN_BACKEND resolve to — see rag/embedder.py and rag/generator.py.
 
 Run with:
     uvicorn service.api:app --host 0.0.0.0 --port 8000
@@ -31,7 +31,9 @@ from app import (
     DATA_DIR,
     CACHE_DIR,
     EMBED_MODEL,
+    EMBED_BACKEND,
     GEN_MODEL,
+    GEN_BACKEND,
     CHUNK_SIZE,
     CHUNK_OVERLAP,
     TOP_K,
@@ -81,13 +83,14 @@ async def lifespan(app: FastAPI):
             chunk_size    = CHUNK_SIZE,
             chunk_overlap = CHUNK_OVERLAP,
             embed_model   = EMBED_MODEL,
+            embed_backend = EMBED_BACKEND,
             backend       = VECTOR_BACKEND,
             cache_dir     = CACHE_DIR,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"[startup] Data directory error: {exc}") from exc
     except ConnectionError as exc:
-        raise RuntimeError(f"[startup] Ollama unreachable: {exc}") from exc
+        raise RuntimeError(f"[startup] embedding backend unreachable: {exc}") from exc
 
     _corpus.chunks       = chunks
     _corpus.metadata     = metadata
@@ -103,8 +106,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title       = "Enterprise RAG API",
     description = (
-        "Air-gapped Retrieval-Augmented Generation service. "
-        "All inference is local via Ollama. No external API calls."
+        "Retrieval-Augmented Generation service. Local-only (Ollama) by "
+        "default; see GET /health for the inference backends actually "
+        "configured on this instance."
     ),
     version = "1.0.0",
     lifespan = lifespan,
@@ -124,10 +128,12 @@ def health_check():
     log.info("Health check — corpus_chunks=%d documents_loaded=%d",
              len(_corpus.chunks), documents_loaded)
     return {
-        "status":           "ok",
-        "embedding_model":  EMBED_MODEL,
-        "generation_model": GEN_MODEL,
-        "documents_loaded": documents_loaded,
+        "status":            "ok",
+        "embedding_backend": EMBED_BACKEND,
+        "embedding_model":   EMBED_MODEL,
+        "generation_backend": GEN_BACKEND,
+        "generation_model":  GEN_MODEL,
+        "documents_loaded":  documents_loaded,
     }
 
 
@@ -143,7 +149,7 @@ def query(request: QueryRequest):
 
     Raises:
         422 Unprocessable Entity: if the request body is malformed
-        503 Service Unavailable:  if Ollama becomes unreachable at query time
+        503 Service Unavailable:  if the inference backend is unreachable at query time
         500 Internal Server Error: if the pipeline output fails schema validation
     """
     if not request.query.strip():
@@ -152,16 +158,18 @@ def query(request: QueryRequest):
     log.info("POST /query — received query='%.80s…'", request.query)
     try:
         response = query_pipeline(
-            query        = request.query,
-            chunks       = _corpus.chunks,
-            metadata     = _corpus.metadata,
-            vector_store = _corpus.vector_store,
-            gen_model    = GEN_MODEL,
-            embed_model  = EMBED_MODEL,
-            top_k        = TOP_K,
+            query         = request.query,
+            chunks        = _corpus.chunks,
+            metadata      = _corpus.metadata,
+            vector_store  = _corpus.vector_store,
+            gen_model     = GEN_MODEL,
+            gen_backend   = GEN_BACKEND,
+            embed_model   = EMBED_MODEL,
+            embed_backend = EMBED_BACKEND,
+            top_k         = TOP_K,
         )
     except ConnectionError as exc:
-        log.error("POST /query failed — Ollama unreachable: %s", exc)
+        log.error("POST /query failed — inference backend unreachable: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValidationError as exc:
         log.error("POST /query failed — validation error: %s", exc)

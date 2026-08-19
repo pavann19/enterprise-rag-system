@@ -12,17 +12,18 @@ Each chunk retains source-level metadata ({ "source": filename }), enabling
 cross-document retrieval, source attribution, and auditability in the final
 structured RAGResponse.
 
-Embedding is the expensive step (one Ollama round-trip per chunk). If
-`cache_dir` is given, the resulting chunks/metadata/vector-store are
-persisted to disk keyed by a hash of (file contents, chunk_size,
-chunk_overlap, embed_model, backend). A subsequent call with an unchanged
-corpus and config loads straight from disk — no re-embedding, no Ollama
-calls — turning ingestion from an every-run cost into a one-time cost that's
-only repeated when the corpus or config actually changes.
+Embedding is the expensive step (one round-trip per chunk against whichever
+embedding backend is configured — see rag/embedder.py). If `cache_dir` is
+given, the resulting chunks/metadata/vector-store are persisted to disk
+keyed by a hash of (file contents, chunk_size, chunk_overlap, embed_model,
+embed_backend, vector backend). A subsequent call with an unchanged corpus
+and config loads straight from disk — no re-embedding — turning ingestion
+from an every-run cost into a one-time cost that's only repeated when the
+corpus or config actually changes.
 
-No external calls beyond Ollama (localhost). No database.
-Drop additional .txt files into the data/ directory and restart — no code
-changes required.
+No database. With the default embed_backend="ollama", no external calls
+beyond Ollama (localhost). Drop additional .txt files into the data/
+directory and restart — no code changes required.
 """
 
 import hashlib
@@ -49,6 +50,7 @@ def _corpus_fingerprint(
     chunk_size: int,
     chunk_overlap: int,
     embed_model: str,
+    embed_backend: str,
     backend: str,
 ) -> str:
     """
@@ -63,7 +65,8 @@ def _corpus_fingerprint(
         hasher.update(filepath.read_bytes())
     hasher.update(
         f"|chunk_size={chunk_size}|overlap={chunk_overlap}"
-        f"|embed_model={embed_model}|backend={backend}".encode("utf-8")
+        f"|embed_model={embed_model}|embed_backend={embed_backend}"
+        f"|backend={backend}".encode("utf-8")
     )
     return hasher.hexdigest()[:16]
 
@@ -101,7 +104,8 @@ def ingest(
     data_dir: Path,
     chunk_size: int         = 300,
     chunk_overlap: int      = 50,
-    embed_model: str        = "nomic-embed-text",
+    embed_model: str        = None,
+    embed_backend: str      = None,
     backend: str            = "numpy",
     cache_dir: Optional[Path] = None,
 ) -> Tuple[List[str], List[Dict[str, str]], VectorStore]:
@@ -122,7 +126,10 @@ def ingest(
         chunk_size:    Approximate character length per chunk.
         chunk_overlap: Character overlap between consecutive chunks to preserve
                        cross-boundary semantic context.
-        embed_model:   Ollama embedding model identifier.
+        embed_model:   Model identifier passed to rag.embedder.embed_texts().
+                       Defaults to that backend's own default model when None.
+        embed_backend: "ollama" or "local" — see rag/embedder.py. Defaults to
+                       the EMBED_BACKEND environment variable when None.
         backend:       Vector store backend — "numpy" (default) or "faiss".
         cache_dir:     Optional directory to persist/load a cached corpus index.
                        Pass None (default) to always re-embed from scratch.
@@ -137,8 +144,8 @@ def ingest(
 
     Raises:
         FileNotFoundError: If data_dir does not exist or contains no .txt files.
-        ConnectionError:   If the Ollama embedding endpoint is not reachable
-                            (only on a cache miss — a cache hit needs no Ollama).
+        ConnectionError:   If embed_backend="ollama" and Ollama is unreachable
+                            (only on a cache miss — a cache hit needs no embedding call).
     """
     log.info("Ingestion started — scanning %s", data_dir)
     txt_files = sorted(Path(data_dir).glob("*.txt"))
@@ -149,7 +156,9 @@ def ingest(
         )
     log.info("Found %d document(s) to ingest", len(txt_files))
 
-    fingerprint = _corpus_fingerprint(txt_files, chunk_size, chunk_overlap, embed_model, backend)
+    fingerprint = _corpus_fingerprint(
+        txt_files, chunk_size, chunk_overlap, embed_model, embed_backend, backend
+    )
     cache_path  = (cache_dir / fingerprint) if cache_dir is not None else None
 
     if cache_path is not None and (cache_path / _MANIFEST_FILENAME).exists():
@@ -177,8 +186,8 @@ def ingest(
         len(all_chunks), len(txt_files),
     )
 
-    log.info("Embedding corpus with model '%s' …", embed_model)
-    corpus_embeddings = embed_texts(all_chunks, model=embed_model)
+    log.info("Embedding corpus — backend='%s' model='%s' …", embed_backend, embed_model)
+    corpus_embeddings = embed_texts(all_chunks, model=embed_model, backend=embed_backend)
     vector_store = build_vector_store(corpus_embeddings, backend=backend)
     log.info(
         "Ingestion complete — %d vectors indexed (backend=%s)",
