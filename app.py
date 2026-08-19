@@ -44,20 +44,22 @@ VECTOR_BACKEND = "numpy"   # or "faiss" — see rag/vector_store.py
 
 # Embedding: "ollama" (default, local, needs OLLAMA_HOST reachable) or
 # "local" (sentence-transformers, in-process, no server — hosted demos).
-EMBED_BACKEND = os.environ.get("EMBED_BACKEND", "ollama")
+EMBED_BACKEND = os.environ.get("EMBED_BACKEND") or "ollama"
 _EMBED_MODEL_DEFAULTS = {"ollama": "nomic-embed-text", "local": "all-MiniLM-L6-v2"}
-EMBED_MODEL = os.environ.get("EMBED_MODEL", _EMBED_MODEL_DEFAULTS.get(EMBED_BACKEND, "nomic-embed-text"))
+# `or` (not .get(key, default)) so an env var set to "" — e.g. docker-compose's
+# ${EMBED_MODEL:-} when the caller didn't override it — is also treated as unset.
+EMBED_MODEL = os.environ.get("EMBED_MODEL") or _EMBED_MODEL_DEFAULTS.get(EMBED_BACKEND, "nomic-embed-text")
 
 # Generation: "ollama" (default, local) or "anthropic"/"groq" (cloud,
 # opt-in only — each requires its own API key — see rag/generator.py for
 # why these exist).
-GEN_BACKEND = os.environ.get("GEN_BACKEND", "ollama")
+GEN_BACKEND = os.environ.get("GEN_BACKEND") or "ollama"
 _GEN_MODEL_DEFAULTS = {
     "ollama":    "mistral",
     "anthropic": "claude-haiku-4-5-20251001",
     "groq":      "llama-3.3-70b-versatile",
 }
-GEN_MODEL = os.environ.get("GEN_MODEL", _GEN_MODEL_DEFAULTS.get(GEN_BACKEND, "mistral"))
+GEN_MODEL = os.environ.get("GEN_MODEL") or _GEN_MODEL_DEFAULTS.get(GEN_BACKEND, "mistral")
 
 
 # ── Phase 1: Ingestion — see rag/ingestion.py ────────────────────────────────

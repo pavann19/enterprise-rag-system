@@ -16,6 +16,11 @@ services:
   # One-shot: pulls the two models this project needs, then exits. Models
   # persist in the ollama_models volume, so this is a no-op on subsequent
   # `docker compose up` runs once the volume is populated.
+  #
+  # Override EMBED_MODEL / GEN_MODEL (e.g. via a .env file or
+  # `GEN_MODEL=qwen2.5:0.5b docker compose up`) if your machine can't fit
+  # mistral (needs ~5-6 GB free RAM to load) — Docker Desktop's default VM
+  # memory allocation is often lower than that.
   ollama-pull:
     image: ollama/ollama:latest
     depends_on:
@@ -23,7 +28,7 @@ services:
         condition: service_healthy
     environment:
       OLLAMA_HOST: "http://ollama:11434"
-    entrypoint: ["/bin/sh", "-c", "ollama pull nomic-embed-text && ollama pull mistral"]
+    entrypoint: ["/bin/sh", "-c", "ollama pull ${EMBED_MODEL:-nomic-embed-text} && ollama pull ${GEN_MODEL:-mistral}"]
     restart: "no"
 
   api:
@@ -34,6 +39,8 @@ services:
         condition: service_completed_successfully
     environment:
       OLLAMA_HOST: "http://ollama:11434"
+      EMBED_MODEL: "${EMBED_MODEL:-}"
+      GEN_MODEL: "${GEN_MODEL:-}"
     ports:
       - "8000:8000"
     volumes:
@@ -54,6 +61,8 @@ services:
         condition: service_completed_successfully
     environment:
       OLLAMA_HOST: "http://ollama:11434"
+      EMBED_MODEL: "${EMBED_MODEL:-}"
+      GEN_MODEL: "${GEN_MODEL:-}"
     ports:
       - "8501:8501"
     volumes:
