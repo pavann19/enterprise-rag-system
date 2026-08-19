@@ -1,0 +1,65 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "11434:11434"   # optional — exposes Ollama on the host too, for debugging
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # One-shot: pulls the two models this project needs, then exits. Models
+  # persist in the ollama_models volume, so this is a no-op on subsequent
+  # `docker compose up` runs once the volume is populated.
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint: ["/bin/sh", "-c", "ollama pull nomic-embed-text && ollama pull mistral"]
+    restart: "no"
+
+  api:
+    build: .
+    command: uvicorn service.api:app --host 0.0.0.0 --port 8000
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    ports:
+      - "8000:8000"
+    volumes:
+      - corpus_cache:/app/.cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  ui:
+    build: .
+    command: streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    ports:
+      - "8501:8501"
+    volumes:
+      - corpus_cache:/app/.cache
+    restart: unless-stopped
+
+volumes:
+  ollama_models:
+  corpus_cache:

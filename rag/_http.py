@@ -8,13 +8,21 @@ error handling, and connection governance across the entire pipeline.
 All public modules delegate Ollama calls here — no urllib boilerplate
 is duplicated in business-logic modules.
 
-Air-gapped by design: all requests are directed to localhost (127.0.0.1).
+Air-gapped by design: every request stays on the private network reachable
+at OLLAMA_HOST — no third-party endpoint is ever contacted. That host
+defaults to localhost for a bare-metal/venv run, and is overridden to the
+"ollama" service name when running under docker-compose (see
+docker-compose.yml) — same code, no branching, just a different address on
+the same private network.
 """
 
 import json
+import os
 import urllib.request
 import urllib.error
 from typing import Any, Dict
+
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
 
 def ollama_post(

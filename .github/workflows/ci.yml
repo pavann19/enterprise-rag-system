@@ -26,7 +26,18 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Syntax check
-        run: python -m py_compile app.py rag/*.py validator/*.py service/*.py streamlit_app.py
+        run: python -m py_compile app.py rag/*.py validator/*.py service/*.py streamlit_app.py eval/*.py
 
       - name: Run tests
         run: python -m pytest tests/ -v
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t enterprise-rag-system:ci .
+
+      - name: Validate compose config
+        run: docker compose config -q

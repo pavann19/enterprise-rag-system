@@ -1,0 +1,14 @@
+.git/
+.github/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+.cache/
+eval/results/
+Gemini_plans/
+*.md
+!README.md
+.streamlit/

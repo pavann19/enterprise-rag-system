@@ -20,13 +20,13 @@ Prerequisite:
 
 from typing import List
 
-from rag._http          import ollama_post
+from rag._http          import OLLAMA_HOST, ollama_post
 from rag.logging_config import get_logger
 
 log = get_logger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-GENERATE_URL      = "http://localhost:11434/api/generate"
+GENERATE_URL      = f"{OLLAMA_HOST}/api/generate"
 DEFAULT_GEN_MODEL = "mistral"
 # ──────────────────────────────────────────────────────────────────────────────
 

@@ -18,10 +18,10 @@ from typing import List
 
 import numpy as np
 
-from rag._http import ollama_post
+from rag._http import OLLAMA_HOST, ollama_post
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-EMBED_URL          = "http://localhost:11434/api/embeddings"
+EMBED_URL           = f"{OLLAMA_HOST}/api/embeddings"
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
 # ──────────────────────────────────────────────────────────────────────────────
 

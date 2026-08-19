@@ -107,7 +107,7 @@ Both backends persist to disk. `rag/ingestion.py::ingest()` accepts a `cache_dir
 
 ### 4. Single Transport Layer
 
-All Ollama API calls are routed through `rag/_http.py::ollama_post()`. This provides a single point of control for timeouts, retry logic, authentication headers, and proxy configuration — none of which are scattered across business-logic modules.
+All Ollama API calls are routed through `rag/_http.py::ollama_post()`, with the Ollama host itself read once from the `OLLAMA_HOST` environment variable (default `http://localhost:11434`). This is what lets the exact same code talk to a bare-metal Ollama install or to the `ollama` service in `docker-compose.yml` with no branching — and gives timeout handling and connection-error messages one place to live instead of being duplicated across `embedder.py` and `generator.py`.
 
 ---
 
@@ -145,6 +145,38 @@ python app.py "What is the role of cosine similarity in retrieval?"
 ```bash
 python -m streamlit run streamlit_app.py
 # → http://localhost:8501
+```
+
+---
+
+## 🐳 Run With Docker
+
+One command brings up Ollama, pulls the two required models into a persistent
+volume, and starts both the API and the browser UI — no local Python
+environment or manual `ollama pull` needed:
+
+```bash
+docker compose up --build
+```
+
+| Service | URL | Notes |
+|---|---|---|
+| `ollama` | `localhost:11434` | Model server; models persist in the `ollama_models` volume |
+| `ollama-pull` | — | One-shot: pulls `nomic-embed-text` + `mistral`, then exits. Only re-runs work if the volume is empty |
+| `api` | `localhost:8000` | FastAPI service — `/health`, `/query`, `/docs` |
+| `ui` | `localhost:8501` | Streamlit browser UI |
+
+The corpus cache (`rag/ingestion.py`'s `cache_dir`) lives in a `corpus_cache`
+volume shared by `api` and `ui`, so ingestion only runs once even though both
+services start independently.
+
+First run pulls ~5 GB of model weights, so expect it to take several
+minutes; subsequent `docker compose up` runs reuse the `ollama_models`
+volume and skip straight to serving.
+
+```bash
+docker compose down          # stop, keep volumes (models + cache)
+docker compose down -v       # stop and wipe volumes — next run re-pulls everything
 ```
 
 ---
@@ -380,7 +412,7 @@ The system is designed to be extended without modifying core pipeline logic:
 | ✅ Done | High | Persist corpus embeddings | `rag/ingestion.py::ingest(cache_dir=...)` — fingerprinted on content + config, skips re-embedding on a cache hit |
 | ✅ Done | High | Pluggable vector store (NumPy / FAISS) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
 | ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR, hit-rate@k, precision@k against a 15-query golden set. Scoped-down alternative to RAGAS (no LLM judge, no cloud dependency); see `eval/README.md`. **Not yet run** — needs a live Ollama instance |
-| ⬜ | High | Containerize (Docker) | `Dockerfile` + `docker-compose.yml` bundling the app and Ollama |
+| ✅ Done | High | Containerize (Docker) | `Dockerfile` + `docker-compose.yml` — `ollama` + `api` + `ui`, one-shot model pull, persistent volumes |
 | ⬜ | Medium | Hosted demo | Deploy Streamlit UI + a cloud-LLM fallback path so reviewers don't need local Ollama |
 | ⬜ | Medium | Qdrant/Pinecone backend | New `VectorStore` implementation for true horizontal scale beyond FAISS's single-process index |
 | ⬜ | Medium | PDF ingestion | Extend `rag/ingestion.py` with `pypdf`; no pipeline changes needed |
