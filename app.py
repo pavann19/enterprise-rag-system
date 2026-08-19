@@ -5,8 +5,9 @@ Orchestration layer for the Enterprise RAG pipeline.
 
 Coordinates two strictly separated execution phases:
 
-  INGESTION  — delegated to rag/ingestion.py (run once per knowledge base)
-    data/*.txt → ingest() → (chunks, metadata, corpus_embeddings)
+  INGESTION  — delegated to rag/ingestion.py (run once per knowledge base,
+               or loaded from cache if the corpus/config is unchanged)
+    data/*.txt → ingest() → (chunks, metadata, vector_store)
 
   QUERY      — retrieval, generation, and schema-validated output (run per request)
     query → embed_texts() → retrieve() → generate_answer() → validate() → RAGResponse
@@ -19,32 +20,37 @@ downstream enterprise APIs and audit pipelines.
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
-
-import numpy as np
+from typing import Dict, List
 
 from rag.ingestion import ingest
 from rag.embedder  import embed_texts
 from rag.retriever import retrieve
 from rag.generator import generate_answer
+from rag.vector_store import VectorStore
 from validator.json_validator import validate, ValidationError, RAGResponse
 
 # ── Configuration ───────────────────────────────────────────────────────────────
 
-DATA_DIR      = Path(__file__).parent / "data"
-EMBED_MODEL   = "nomic-embed-text"
-GEN_MODEL     = "mistral"
-CHUNK_SIZE    = 300
-CHUNK_OVERLAP = 50
-TOP_K         = 3
+DATA_DIR       = Path(__file__).parent / "data"
+CACHE_DIR      = Path(__file__).parent / ".cache" / "corpus"
+EMBED_MODEL    = "nomic-embed-text"
+GEN_MODEL      = "mistral"
+CHUNK_SIZE     = 300
+CHUNK_OVERLAP  = 50
+TOP_K          = 3
+VECTOR_BACKEND = "numpy"   # or "faiss" — see rag/vector_store.py
 
 
 # ── Phase 1: Ingestion — see rag/ingestion.py ────────────────────────────────
 #
 # ingest() is imported directly from rag.ingestion.
 # Call signature:
-#   ingest(data_dir, chunk_size, chunk_overlap, embed_model)
-#      → (chunks, metadata, corpus_embeddings)
+#   ingest(data_dir, chunk_size, chunk_overlap, embed_model, backend, cache_dir)
+#      → (chunks, metadata, vector_store)
+#
+# Passing cache_dir persists the embedded corpus to disk, keyed by a hash of
+# the document contents and ingestion config — an unchanged corpus loads
+# from disk on the next run instead of re-embedding every chunk via Ollama.
 
 
 # ── Phase 2: Query pipeline ─────────────────────────────────────────────────────
@@ -53,7 +59,7 @@ def query_pipeline(
     query: str,
     chunks: List[str],
     metadata: List[Dict[str, str]],
-    corpus_embeddings: np.ndarray,
+    vector_store: VectorStore,
     gen_model: str   = GEN_MODEL,
     embed_model: str = EMBED_MODEL,
     top_k: int       = TOP_K,
@@ -63,13 +69,13 @@ def query_pipeline(
     generates a context-grounded answer, and validates the structured response.
 
     Args:
-        query:             User question.
-        chunks:            All chunk texts (from ingest()).
-        metadata:          Parallel metadata list (from ingest()).
-        corpus_embeddings: Precomputed corpus embedding matrix.
-        gen_model:         Ollama generation model identifier.
-        embed_model:       Ollama embedding model identifier.
-        top_k:             Number of passages to retrieve.
+        query:        User question.
+        chunks:       All chunk texts (from ingest()).
+        metadata:     Parallel metadata list (from ingest()).
+        vector_store: Built VectorStore over the corpus embeddings (from ingest()).
+        gen_model:    Ollama generation model identifier.
+        embed_model:  Ollama embedding model identifier.
+        top_k:        Number of passages to retrieve.
 
     Returns:
         A validated RAGResponse TypedDict.
@@ -83,11 +89,11 @@ def query_pipeline(
 
     # 2. Retrieve top-k passages with source metadata
     results = retrieve(
-        query_embedding   = query_embedding,
-        corpus_embeddings = corpus_embeddings,
-        chunks            = chunks,
-        metadata          = metadata,
-        top_k             = top_k,
+        query_embedding = query_embedding,
+        vector_store    = vector_store,
+        chunks          = chunks,
+        metadata        = metadata,
+        top_k           = top_k,
     )
     # results: [{"text": str, "score": float, "source": str}, ...]
 
@@ -117,7 +123,14 @@ if __name__ == "__main__":
 
     print("\n── INGESTION ──────────────────────────────")
     try:
-        chunks, metadata, corpus_embeddings = ingest()
+        chunks, metadata, vector_store = ingest(
+            data_dir      = DATA_DIR,
+            chunk_size    = CHUNK_SIZE,
+            chunk_overlap = CHUNK_OVERLAP,
+            embed_model   = EMBED_MODEL,
+            backend       = VECTOR_BACKEND,
+            cache_dir     = CACHE_DIR,
+        )
     except (FileNotFoundError, ConnectionError) as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
@@ -127,10 +140,10 @@ if __name__ == "__main__":
 
     try:
         response = query_pipeline(
-            query             = query,
-            chunks            = chunks,
-            metadata          = metadata,
-            corpus_embeddings = corpus_embeddings,
+            query        = query,
+            chunks       = chunks,
+            metadata     = metadata,
+            vector_store = vector_store,
         )
     except ConnectionError as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)

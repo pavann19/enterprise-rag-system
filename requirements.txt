@@ -1,4 +1,24 @@
-numpy
-fastapi
-uvicorn[standard]
-streamlit
+# Core pipeline
+numpy>=1.24.0
+typing_extensions>=4.9.0   # TypedDict used directly by validator/json_validator.py
+
+# Service layer (service/api.py)
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.6.0            # imported directly by service/api.py; also a fastapi dependency
+
+# Browser UI (streamlit_app.py)
+streamlit>=1.32.0
+
+# Dev / test
+pytest>=8.0.0
+
+# Optional — FAISS vector store backend (rag/vector_store.py).
+# Not required: the default "numpy" backend has zero extra dependencies.
+# Uncomment to enable backend="faiss" in app.py / service/api.py / streamlit_app.py:
+# faiss-cpu>=1.8.0
+
+# Ollama is a separate local install, not a pip package:
+# https://ollama.ai/download
+# ollama pull nomic-embed-text
+# ollama pull mistral

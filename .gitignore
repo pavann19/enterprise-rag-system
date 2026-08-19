@@ -33,3 +33,14 @@ Thumbs.db
 # Numpy saved arrays (generated at runtime)
 *.npy
 *.npz
+
+# Persisted corpus cache (rag/ingestion.py cache_dir) — regenerated on demand
+.cache/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Evaluation run output (eval/run_eval.py) — regenerated on demand
+eval/results/

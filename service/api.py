@@ -21,23 +21,25 @@ The existing CLI entry point (app.py) and Streamlit UI are not affected.
 """
 
 from contextlib import asynccontextmanager
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app import (
     query_pipeline,
     DATA_DIR,
+    CACHE_DIR,
     EMBED_MODEL,
     GEN_MODEL,
     CHUNK_SIZE,
     CHUNK_OVERLAP,
     TOP_K,
+    VECTOR_BACKEND,
 )
 from rag.ingestion      import ingest
 from rag.logging_config import get_logger
+from rag.vector_store   import VectorStore
 from validator.json_validator import ValidationError
 
 log = get_logger(__name__)
@@ -54,14 +56,14 @@ class QueryRequest(BaseModel):
 
 class _CorpusState:
     """In-process singleton holding the ingested corpus."""
-    chunks:   List[str]
-    metadata: List[Dict[str, str]]
-    embeddings: np.ndarray
+    chunks:       List[str]
+    metadata:     List[Dict[str, str]]
+    vector_store: Optional[VectorStore]
 
     def __init__(self):
-        self.chunks    = []
-        self.metadata  = []
-        self.embeddings = np.empty((0,), dtype=np.float32)
+        self.chunks       = []
+        self.metadata     = []
+        self.vector_store = None
 
 
 _corpus = _CorpusState()
@@ -74,20 +76,22 @@ async def lifespan(app: FastAPI):
     """Load the document corpus once at startup; release on shutdown."""
     log.info("Service startup — ingesting document corpus from %s", DATA_DIR)
     try:
-        chunks, metadata, embeddings = ingest(
+        chunks, metadata, vector_store = ingest(
             data_dir      = DATA_DIR,
             chunk_size    = CHUNK_SIZE,
             chunk_overlap = CHUNK_OVERLAP,
             embed_model   = EMBED_MODEL,
+            backend       = VECTOR_BACKEND,
+            cache_dir     = CACHE_DIR,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"[startup] Data directory error: {exc}") from exc
     except ConnectionError as exc:
         raise RuntimeError(f"[startup] Ollama unreachable: {exc}") from exc
 
-    _corpus.chunks     = chunks
-    _corpus.metadata   = metadata
-    _corpus.embeddings = embeddings
+    _corpus.chunks       = chunks
+    _corpus.metadata     = metadata
+    _corpus.vector_store = vector_store
     log.info("Corpus ready — %d chunks from %d document(s)",
              len(chunks), len({m['source'] for m in metadata}))
     yield
@@ -148,13 +152,13 @@ def query(request: QueryRequest):
     log.info("POST /query — received query='%.80s…'", request.query)
     try:
         response = query_pipeline(
-            query             = request.query,
-            chunks            = _corpus.chunks,
-            metadata          = _corpus.metadata,
-            corpus_embeddings = _corpus.embeddings,
-            gen_model         = GEN_MODEL,
-            embed_model       = EMBED_MODEL,
-            top_k             = TOP_K,
+            query        = request.query,
+            chunks       = _corpus.chunks,
+            metadata     = _corpus.metadata,
+            vector_store = _corpus.vector_store,
+            gen_model    = GEN_MODEL,
+            embed_model  = EMBED_MODEL,
+            top_k        = TOP_K,
         )
     except ConnectionError as exc:
         log.error("POST /query failed — Ollama unreachable: %s", exc)

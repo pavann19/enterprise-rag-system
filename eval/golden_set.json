@@ -1,0 +1,20 @@
+{
+  "_comment": "Hand-curated retrieval golden set. Each query is grounded in a specific passage of one data/*.txt file, verified by reading the source document (not generated blind). expected_source is the filename retrieval should surface at or near rank 1. This is a RETRIEVAL evaluation set (does the right document come back) — it does not judge answer quality/faithfulness, which would require an LLM judge and is out of scope for this air-gapped harness. See eval/README.md.",
+  "queries": [
+    {"id": "fp-01", "query": "What is the approval threshold above which the CFO must approve a capital expenditure?", "expected_source": "financial_policy.txt"},
+    {"id": "fp-02", "query": "What happens when a department's budget variance exceeds 10 percent?", "expected_source": "financial_policy.txt"},
+    {"id": "fp-03", "query": "What are the standard payment terms for vendor invoices?", "expected_source": "financial_policy.txt"},
+    {"id": "fp-04", "query": "How many years must financial records be retained?", "expected_source": "financial_policy.txt"},
+    {"id": "fp-05", "query": "What tolerance is allowed when matching a vendor invoice to its purchase order?", "expected_source": "financial_policy.txt"},
+    {"id": "bf-01", "query": "How many days before the new fiscal year does the annual budgeting cycle begin?", "expected_source": "budgeting_framework.txt"},
+    {"id": "bf-02", "query": "What document must departments submit alongside their budget for an AI or automation initiative?", "expected_source": "budgeting_framework.txt"},
+    {"id": "bf-03", "query": "Above what dollar amount does an AI investment require Technology Investment Committee review?", "expected_source": "budgeting_framework.txt"},
+    {"id": "bf-04", "query": "What revenue decline range is used to model the downside budget scenario?", "expected_source": "budgeting_framework.txt"},
+    {"id": "bf-05", "query": "Who gives final approval to the proposed annual budget?", "expected_source": "budgeting_framework.txt"},
+    {"id": "ac-01", "query": "Which internal control framework does the organization's control environment align with?", "expected_source": "audit_controls.txt"},
+    {"id": "ac-02", "query": "What are the three severity tiers used to classify a control deficiency?", "expected_source": "audit_controls.txt"},
+    {"id": "ac-03", "query": "How many days after the due date can an open audit finding stay unresolved before it is escalated to the Audit Committee?", "expected_source": "audit_controls.txt"},
+    {"id": "ac-04", "query": "What sample size range is typically used to test a high-frequency, high-risk control?", "expected_source": "audit_controls.txt"},
+    {"id": "ac-05", "query": "Who does the Chief Audit Executive report to in order to preserve independence?", "expected_source": "audit_controls.txt"}
+  ]
+}

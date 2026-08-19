@@ -1,5 +1,8 @@
 # Enterprise RAG System — FP&A Platform Edition
 
+[![CI](https://github.com/pavann19/enterprise-rag-system/actions/workflows/ci.yml/badge.svg)](https://github.com/pavann19/enterprise-rag-system/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A modular, deterministic Retrieval-Augmented Generation (RAG) pipeline built to power enterprise Financial Planning & Analysis (FP&A) workflows. Designed for seamless backend integration, this system extracts, synthesizes, and enforces structured insights from complex financial documents, policy manuals, and operational reports.
 
 The pipeline is exposed via a robust FastAPI service layer, enabling tight integration with multi-step agentic AI workflows and internal decision-support systems. It maintains strict standards for deterministic JSON output and data residency, executing securely on local infrastructure.
@@ -72,7 +75,8 @@ Each pipeline stage is an independent Python module with a single responsibility
 | `rag/ingestion.py` | Multi-document loading, chunking, and embedding | Ollama `/api/embeddings` |
 | `rag/chunker.py` | Word-boundary text segmentation | None |
 | `rag/embedder.py` | Dense vector encoding | Ollama `/api/embeddings` |
-| `rag/retriever.py` | Cosine similarity ranking | None |
+| `rag/vector_store.py` | Pluggable similarity index (NumPy / FAISS), with save/load | None |
+| `rag/retriever.py` | Translates vector-store hits into chunk text + source metadata | None |
 | `rag/generator.py` | Context-grounded generation | Ollama `/api/generate` |
 | `validator/json_validator.py` | Output schema enforcement | None |
 | `service/api.py` | FastAPI REST service layer | None |
@@ -84,17 +88,22 @@ Every pipeline response is enforced against the `RAGResponse` TypedDict before i
 
 ```python
 class RAGResponse(TypedDict):
-    query:   str        # original user question
-    answer:  str        # LLM-generated, context-grounded answer
-    sources: List[str]  # top-k retrieved passages (full text)
-    model:   str        # Ollama generation model used
+    query:   str               # original user question
+    answer:  str               # LLM-generated, context-grounded answer
+    sources: List[SourceEntry] # top-k retrieved passages, each {"text", "source"}
+    model:   str                # Ollama generation model used
 ```
 
-### 3. Lightweight Prototyping Vector Store
+### 3. Pluggable Vector Store, With Persistence
 
-The retrieval corpus is maintained as a `float32` NumPy array. This provides a zero-dependency, in-memory backend ideal for rapid prototyping and verifying deterministic retrieval behaviour without index approximation errors.
+Similarity search is hidden behind a `VectorStore` interface (`rag/vector_store.py`) with two interchangeable backends:
 
-For production scale-out, this prototyping backend provides a clear architectural path to be substituted with a dedicated vector database such as FAISS or Qdrant. Because retrieval logic is isolated behind the `retrieve()` interface, scaling the vector engine requires zero downstream code changes to the generation or validation layers.
+- **`numpy`** (default) — exact cosine similarity over a `float32` array. Zero extra dependencies.
+- **`faiss`** (optional, `pip install faiss-cpu`) — exact inner-product search via `IndexFlatIP` over L2-normalized vectors, same ranking semantics, backed by a purpose-built similarity-search library.
+
+`rag/retriever.py` calls `vector_store.search()` and has no idea which backend is underneath — swapping backends is a one-line config change (`VECTOR_BACKEND` in `app.py`), not a rewrite.
+
+Both backends persist to disk. `rag/ingestion.py::ingest()` accepts a `cache_dir`; the embedded corpus (chunks, metadata, and the index itself) is cached under a fingerprint hashed from document contents + chunking/embedding config. An unchanged corpus loads straight from disk on the next run — no re-embedding, no Ollama calls — until a document or config actually changes.
 
 ### 4. Single Transport Layer
 
@@ -120,7 +129,7 @@ ollama serve
 ### Install Python dependencies
 
 ```bash
-pip install -r requirements.txt    # numpy + streamlit only
+pip install -r requirements.txt    # numpy, fastapi, uvicorn, pydantic, streamlit, pytest
 ```
 
 ### Run — CLI
@@ -140,7 +149,7 @@ python -m streamlit run streamlit_app.py
 
 ---
 
-## � Multi-Document Corpus Support
+## 📁 Multi-Document Corpus Support
 
 The ingestion pipeline automatically scans the `data/` directory and builds a unified embedding corpus across multiple documents. Each chunk retains source-level metadata, enabling:
 
@@ -164,7 +173,7 @@ To add documents, drop any `.txt` file into `data/` and restart the application.
 
 ---
 
-## �🔄 Pipeline Flow (Step-by-Step)
+## 🔄 Pipeline Flow (Step-by-Step)
 
 **Phase 1 — Ingestion** *(executed once per knowledge base)*
 
@@ -189,14 +198,51 @@ To add documents, drop any `.txt` file into `data/` and restart the application.
 All runtime parameters are declared as named constants at the top of `app.py`:
 
 ```python
-EMBED_MODEL   = "nomic-embed-text"   # swap for any Ollama embedding model
-GEN_MODEL     = "mistral"            # swap for llama3, phi3, gemma, etc.
-CHUNK_SIZE    = 300                  # approximate characters per chunk
-CHUNK_OVERLAP = 50                   # character overlap between chunks
-TOP_K         = 3                    # passages injected into the generation prompt
+EMBED_MODEL    = "nomic-embed-text"   # swap for any Ollama embedding model
+GEN_MODEL      = "mistral"            # swap for llama3, phi3, gemma, etc.
+CHUNK_SIZE     = 300                  # approximate characters per chunk
+CHUNK_OVERLAP  = 50                   # character overlap between chunks
+TOP_K          = 3                    # passages injected into the generation prompt
+VECTOR_BACKEND = "numpy"              # or "faiss" — see rag/vector_store.py
+CACHE_DIR      = Path(...) / ".cache" / "corpus"  # persisted embeddings; delete to force re-embedding
 ```
 
 ---
+
+---
+
+## ✅ Testing
+
+Unit tests cover every pure-function module — chunking, retrieval, schema validation,
+and prompt construction — plus the error paths (empty input, malformed schema, Ollama
+unreachable). None of these require a running Ollama instance.
+
+```bash
+pip install -r requirements.txt
+python -m pytest tests/ -v
+```
+
+Runs automatically on every push/PR via [GitHub Actions](.github/workflows/ci.yml)
+against Python 3.11 and 3.12.
+
+**Not yet covered:** live integration against a running Ollama instance, the FastAPI
+and Streamlit entry points, and answer-quality evaluation (retrieval quality is
+covered separately below). See Roadmap.
+
+---
+
+## 📈 Retrieval Evaluation
+
+`eval/` scores retrieval quality (does the right document come back) against a
+15-query hand-labeled golden set — MRR, hit-rate@k, precision@k. No LLM judge, no
+cloud dependency; see [`eval/README.md`](eval/README.md) for what this does and
+does not measure, and why answer-quality metrics (faithfulness, relevancy) are out
+of scope for now.
+
+```bash
+ollama serve
+python -m eval.run_eval
+```
 
 ---
 
@@ -303,7 +349,8 @@ The system is designed to be extended without modifying core pipeline logic:
 
 | Extension | How |
 |---|---|
-| **Swap retrieval backend** | Replace `retriever.py` internals with FAISS; `retrieve()` signature unchanged |
+| **Swap retrieval backend** | Set `VECTOR_BACKEND = "faiss"` in `app.py`; `retrieve()` signature unchanged |
+| **Swap to Qdrant/Pinecone at scale** | Add a new backend class to `rag/vector_store.py` implementing `search()`/`save()`/`load()` |
 | **Swap embedding model** | Change `EMBED_MODEL` constant in `app.py`; no code changes elsewhere |
 | **Swap generation model** | Change `GEN_MODEL` constant in `app.py`; no code changes elsewhere |
 | **Add streaming output** | Pass `"stream": true` to `generator.py`; yield tokens progressively |
@@ -313,6 +360,8 @@ The system is designed to be extended without modifying core pipeline logic:
 ---
 
 ## 📊 Operational Characteristics
+
+> **Not yet benchmarked.** The figures below are indicative ranges typical of these model sizes on comparable hardware, not measurements taken from this repository. No benchmark harness or captured run log exists yet — see the Roadmap for the planned evaluation harness. Treat this table as a rough expectation-setter, not a performance claim.
 
 | Metric | CPU (6-core) | GPU (8 GB VRAM) |
 |---|---|---|
@@ -325,14 +374,21 @@ The system is designed to be extended without modifying core pipeline logic:
 
 ## 🔭 Roadmap
 
-| Priority | Item | Notes |
-|---|---|---|
-| High | Persist corpus embeddings | `np.save / np.load` to eliminate startup re-embedding |
-| High | FAISS index integration | Drop-in via `retrieve()` interface; enables sub-millisecond retrieval at scale |
-| Medium | PDF ingestion | Extend `rag/ingestion.py` with `pypdf`; no pipeline changes needed |
-| Medium | RAGAS evaluation harness | Faithfulness, answer relevancy, context recall metrics |
-| Low | Streaming token output | Client-side progressive rendering |
-| Low | Cross-encoder re-ranking | Improved passage precision at the cost of additional latency |
+| Status | Priority | Item | Notes |
+|---|---|---|---|
+| ✅ Done | — | Unit tests + CI | `tests/` (60 tests) + `.github/workflows/ci.yml`, see Testing |
+| ✅ Done | High | Persist corpus embeddings | `rag/ingestion.py::ingest(cache_dir=...)` — fingerprinted on content + config, skips re-embedding on a cache hit |
+| ✅ Done | High | Pluggable vector store (NumPy / FAISS) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
+| ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR, hit-rate@k, precision@k against a 15-query golden set. Scoped-down alternative to RAGAS (no LLM judge, no cloud dependency); see `eval/README.md`. **Not yet run** — needs a live Ollama instance |
+| ⬜ | High | Containerize (Docker) | `Dockerfile` + `docker-compose.yml` bundling the app and Ollama |
+| ⬜ | Medium | Hosted demo | Deploy Streamlit UI + a cloud-LLM fallback path so reviewers don't need local Ollama |
+| ⬜ | Medium | Qdrant/Pinecone backend | New `VectorStore` implementation for true horizontal scale beyond FAISS's single-process index |
+| ⬜ | Medium | PDF ingestion | Extend `rag/ingestion.py` with `pypdf`; no pipeline changes needed |
+| ⬜ | Medium | Integration tests for `service/api.py` / `streamlit_app.py` | `httpx.AsyncClient` + `TestClient` against a mocked Ollama |
+| ⬜ | Medium | Answer-quality evaluation (faithfulness/relevancy) | Requires an LLM judge — local model or cloud API; deliberately deferred, see `eval/README.md` |
+| ⬜ | Low | Streaming token output | Client-side progressive rendering |
+| ⬜ | Low | Cross-encoder re-ranking | Improved passage precision at the cost of additional latency |
+| ⬜ | Low | Basic auth / rate limiting on `service/api.py` | Only relevant once the API is exposed beyond localhost |
 
 ---
 

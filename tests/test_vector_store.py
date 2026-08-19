@@ -1,0 +1,124 @@
+import numpy as np
+import pytest
+
+from rag.vector_store import (
+    NumpyVectorStore,
+    build_vector_store,
+    load_vector_store,
+)
+
+try:
+    import faiss  # noqa: F401
+    FAISS_AVAILABLE = True
+except ImportError:
+    FAISS_AVAILABLE = False
+
+
+# ── NumpyVectorStore ─────────────────────────────────────────────────────────
+
+def test_numpy_store_identical_vector_scores_one():
+    store = NumpyVectorStore(np.array([[1.0, 2.0, 3.0]]))
+    hits = store.search(np.array([1.0, 2.0, 3.0]), top_k=1)
+    assert hits[0][0] == 0
+    assert hits[0][1] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_numpy_store_orthogonal_vector_scores_zero():
+    store = NumpyVectorStore(np.array([[0.0, 1.0]]))
+    hits = store.search(np.array([1.0, 0.0]), top_k=1)
+    assert hits[0][1] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_numpy_store_search_sorted_descending():
+    corpus = np.array([[1.0, 0.0], [0.0, 1.0], [0.9, 0.1]])
+    store = NumpyVectorStore(corpus)
+    hits = store.search(np.array([1.0, 0.0]), top_k=3)
+    scores = [score for _, score in hits]
+    assert scores == sorted(scores, reverse=True)
+    assert hits[0][0] == 0  # index 0 is the identical vector
+
+
+def test_numpy_store_top_k_clamped_to_size():
+    store = NumpyVectorStore(np.array([[1.0, 0.0]]))
+    hits = store.search(np.array([1.0, 0.0]), top_k=10)
+    assert len(hits) == 1
+
+
+def test_numpy_store_len():
+    store = NumpyVectorStore(np.array([[1.0, 0.0], [0.0, 1.0]]))
+    assert len(store) == 2
+
+
+def test_numpy_store_rejects_1d_input():
+    with pytest.raises(ValueError):
+        NumpyVectorStore(np.array([1.0, 2.0, 3.0]))
+
+
+def test_numpy_store_save_load_roundtrip(tmp_path):
+    corpus = np.array([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]], dtype=np.float32)
+    store = NumpyVectorStore(corpus)
+    store.save(tmp_path)
+
+    loaded = NumpyVectorStore.load(tmp_path)
+    assert len(loaded) == len(store)
+
+    query = np.array([1.0, 0.0])
+    original_hits = store.search(query, top_k=3)
+    loaded_hits = loaded.search(query, top_k=3)
+    assert original_hits == loaded_hits
+
+
+# ── Factory ────────────────────────────────────────────────────────────────
+
+def test_build_vector_store_numpy_default():
+    store = build_vector_store(np.array([[1.0, 0.0]]))
+    assert isinstance(store, NumpyVectorStore)
+
+
+def test_build_vector_store_rejects_unknown_backend():
+    with pytest.raises(ValueError):
+        build_vector_store(np.array([[1.0, 0.0]]), backend="nonexistent")
+
+
+def test_load_vector_store_rejects_unknown_backend(tmp_path):
+    with pytest.raises(ValueError):
+        load_vector_store(tmp_path, backend="nonexistent")
+
+
+# ── FAISS backend (skipped if faiss is not installed) ───────────────────────
+
+@pytest.mark.skipif(not FAISS_AVAILABLE, reason="faiss-cpu not installed")
+class TestFaissVectorStore:
+    def test_ranking_matches_numpy_backend(self):
+        from rag.vector_store import FaissVectorStore
+
+        rng = np.random.default_rng(seed=42)
+        corpus = rng.random((20, 8)).astype(np.float32)
+        query = rng.random(8).astype(np.float32)
+
+        numpy_hits = NumpyVectorStore(corpus).search(query, top_k=5)
+        faiss_hits = FaissVectorStore(corpus).search(query, top_k=5)
+
+        numpy_order = [idx for idx, _ in numpy_hits]
+        faiss_order = [idx for idx, _ in faiss_hits]
+        assert numpy_order == faiss_order
+        for (_, n_score), (_, f_score) in zip(numpy_hits, faiss_hits):
+            assert n_score == pytest.approx(f_score, abs=1e-4)
+
+    def test_save_load_roundtrip(self, tmp_path):
+        from rag.vector_store import FaissVectorStore
+
+        corpus = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        store = FaissVectorStore(corpus)
+        store.save(tmp_path)
+
+        loaded = FaissVectorStore.load(tmp_path)
+        assert len(loaded) == len(store)
+
+
+def test_faiss_backend_raises_clear_error_when_not_installed(monkeypatch):
+    if FAISS_AVAILABLE:
+        pytest.skip("faiss is installed — this test targets the missing-dependency path")
+
+    with pytest.raises(ImportError, match="faiss-cpu"):
+        build_vector_store(np.array([[1.0, 0.0]]), backend="faiss")

@@ -17,7 +17,15 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent))
 
 from rag.ingestion import ingest
-from app import query_pipeline, DATA_DIR, EMBED_MODEL, GEN_MODEL, TOP_K
+from app import (
+    query_pipeline,
+    DATA_DIR,
+    CACHE_DIR,
+    EMBED_MODEL,
+    GEN_MODEL,
+    TOP_K,
+    VECTOR_BACKEND,
+)
 from validator.json_validator import ValidationError
 
 # ── Page config ────────────────────────────────────────────────────────────────
@@ -43,10 +51,12 @@ with st.sidebar:
 
 @st.cache_resource(show_spinner="Loading and embedding document corpus…")
 def load_corpus(data_dir: str, embed_model_key: str):
-    """Ingests all .txt files and returns (chunks, metadata, embeddings)."""
+    """Ingests all .txt files and returns (chunks, metadata, vector_store)."""
     return ingest(
         data_dir    = Path(data_dir),
         embed_model = embed_model_key,
+        backend     = VECTOR_BACKEND,
+        cache_dir   = CACHE_DIR,
     )
 
 # ── Main UI ────────────────────────────────────────────────────────────────────
@@ -56,7 +66,7 @@ st.caption("Local Retrieval-Augmented Generation powered by Ollama · No cloud A
 
 # Load corpus — show friendly error if Ollama is down or data dir is empty
 try:
-    chunks, metadata, corpus_embeddings = load_corpus(str(DATA_DIR), embed_model)
+    chunks, metadata, vector_store = load_corpus(str(DATA_DIR), embed_model)
 except FileNotFoundError as exc:
     st.error(f"**Data directory error:** {exc}")
     st.stop()
@@ -89,13 +99,13 @@ if st.button("Ask", type="primary"):
         with st.spinner("Retrieving and generating…"):
             try:
                 response = query_pipeline(
-                    query             = query,
-                    chunks            = chunks,
-                    metadata          = metadata,
-                    corpus_embeddings = corpus_embeddings,
-                    gen_model         = gen_model,
-                    embed_model       = embed_model,
-                    top_k             = top_k,
+                    query        = query,
+                    chunks       = chunks,
+                    metadata     = metadata,
+                    vector_store = vector_store,
+                    gen_model    = gen_model,
+                    embed_model  = embed_model,
+                    top_k        = top_k,
                 )
             except ConnectionError as exc:
                 host = str(exc).split("'")[1] if "'" in str(exc) else "http://localhost:11434"
