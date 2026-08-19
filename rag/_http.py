@@ -22,7 +22,7 @@ import urllib.request
 import urllib.error
 from typing import Any, Dict
 
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 
 
 def ollama_post(

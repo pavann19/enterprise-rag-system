@@ -48,14 +48,17 @@ def chunk_text(text: str, chunk_size: int = 300, overlap: int = 50) -> List[str]
 
         if current_len >= chunk_size:
             chunks.append(" ".join(current_chunk))
-            # Keep last `overlap` characters worth of words for context
+            # Keep last `overlap` characters worth of words for context.
+            # overlap=0 means no carry-over at all — skip the loop entirely
+            # rather than always keeping at least one word.
             overlap_words: List[str] = []
-            overlap_len = 0
-            for w in reversed(current_chunk):
-                overlap_len += len(w) + 1
-                overlap_words.insert(0, w)
-                if overlap_len >= overlap:
-                    break
+            if overlap > 0:
+                overlap_len = 0
+                for w in reversed(current_chunk):
+                    overlap_len += len(w) + 1
+                    overlap_words.insert(0, w)
+                    if overlap_len >= overlap:
+                        break
             current_chunk = overlap_words
             current_len = sum(len(w) + 1 for w in current_chunk)
 

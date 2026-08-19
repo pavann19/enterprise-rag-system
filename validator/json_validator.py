@@ -83,6 +83,10 @@ def validate(response: Dict[str, Any]) -> RAGResponse:
     Raises:
         ValidationError: If any field is missing, wrong type, or blank.
     """
+    if not isinstance(response, dict):
+        log.error("Validation failed — expected a dict, got %s", type(response).__name__)
+        raise ValidationError(f"Expected a dict, got {type(response).__name__}.")
+
     required_keys = {"query", "answer", "sources", "model"}
     missing = required_keys - response.keys()
     if missing:

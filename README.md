@@ -300,9 +300,18 @@ GEN_MODEL      = os.environ.get("GEN_MODEL", ...)             # per-backend defa
 
 ## ✅ Testing
 
-Unit tests cover every pure-function module — chunking, retrieval, schema validation,
-and prompt construction — plus the error paths (empty input, malformed schema, Ollama
-unreachable). None of these require a running Ollama instance.
+140 tests across two layers:
+
+- **Unit tests** for every pure-function module — chunking, vector search, retrieval,
+  schema validation, prompt construction, HTTP config, backend dispatch — including
+  boundary conditions (empty/whitespace input, dimension mismatches, tied scores,
+  unicode, zero-overlap, malformed schemas, missing dependencies/API keys), not just
+  the happy path.
+- **Integration tests** for both entry points — `service/api.py` via FastAPI's
+  `TestClient` (routing, request validation, lifespan startup errors, HTTP status
+  mapping) and `streamlit_app.py` via Streamlit's `AppTest` harness (full script
+  execution, widget interaction, error rendering) — with ingestion and generation
+  stubbed out, so none of this requires a running Ollama instance.
 
 ```bash
 pip install -r requirements.txt
@@ -312,9 +321,14 @@ python -m pytest tests/ -v
 Runs automatically on every push/PR via [GitHub Actions](.github/workflows/ci.yml)
 against Python 3.11 and 3.12.
 
-**Not yet covered:** live integration against a running Ollama instance, the FastAPI
-and Streamlit entry points, and answer-quality evaluation (retrieval quality is
-covered separately below). See Roadmap.
+This test pass also caught two real bugs, fixed alongside the tests that found them:
+`validate()` raised an unhandled `AttributeError` instead of `ValidationError` on
+non-dict input, and `chunk_text(..., overlap=0)` always carried one word into the
+next chunk instead of zero, due to a loop that ran once before checking its own exit
+condition.
+
+**Not yet covered:** live integration against a running Ollama instance (that's what
+`eval/run_eval.py` exercises for retrieval), and answer-quality evaluation. See Roadmap.
 
 ---
 
@@ -463,7 +477,7 @@ The system is designed to be extended without modifying core pipeline logic:
 
 | Status | Priority | Item | Notes |
 |---|---|---|---|
-| ✅ Done | — | Unit tests + CI | `tests/` (74 tests) + `.github/workflows/ci.yml`, see Testing |
+| ✅ Done | — | Unit + integration tests, CI | `tests/` (140 tests) + `.github/workflows/ci.yml`, see Testing |
 | ✅ Done | High | Persist corpus embeddings | `rag/ingestion.py::ingest(cache_dir=...)` — fingerprinted on content + config, skips re-embedding on a cache hit |
 | ✅ Done | High | Pluggable vector store (NumPy / FAISS) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
 | ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR, hit-rate@k, precision@k against a 15-query golden set. Scoped-down alternative to RAGAS (no LLM judge, no cloud dependency); see `eval/README.md`. **Not yet run** — needs a live Ollama instance |
@@ -471,7 +485,7 @@ The system is designed to be extended without modifying core pipeline logic:
 | 🟡 Partial | Medium | Hosted demo | `EMBED_BACKEND=local` / `GEN_BACKEND=anthropic` implemented and tested, see [Hosted / Public Demo](#-hosted--public-demo) — actual deployment to Streamlit Cloud/HF Spaces not yet done |
 | ⬜ | Medium | Qdrant/Pinecone backend | New `VectorStore` implementation for true horizontal scale beyond FAISS's single-process index |
 | ⬜ | Medium | PDF ingestion | Extend `rag/ingestion.py` with `pypdf`; no pipeline changes needed |
-| ⬜ | Medium | Integration tests for `service/api.py` / `streamlit_app.py` | `httpx.AsyncClient` + `TestClient` against a mocked Ollama |
+| ✅ Done | Medium | Integration tests for `service/api.py` / `streamlit_app.py` | FastAPI `TestClient` + Streamlit `AppTest`, ingestion/generation stubbed — see Testing |
 | ⬜ | Medium | Answer-quality evaluation (faithfulness/relevancy) | Requires an LLM judge — local model or cloud API; deliberately deferred, see `eval/README.md` |
 | ⬜ | Low | Streaming token output | Client-side progressive rendering |
 | ⬜ | Low | Cross-encoder re-ranking | Improved passage precision at the cost of additional latency |

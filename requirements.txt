@@ -12,6 +12,7 @@ streamlit>=1.32.0
 
 # Dev / test
 pytest>=8.0.0
+httpx>=0.27.0               # required by fastapi.testclient.TestClient (tests/test_api_integration.py)
 
 # Optional — FAISS vector store backend (rag/vector_store.py).
 # Not required: the default "numpy" backend has zero extra dependencies.

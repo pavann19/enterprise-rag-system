@@ -65,6 +65,13 @@ class NumpyVectorStore:
         self._embeddings = embeddings.astype(np.float32, copy=False)
 
     def search(self, query_embedding: np.ndarray, top_k: int) -> List[Tuple[int, float]]:
+        if query_embedding.shape[-1] != self._embeddings.shape[-1]:
+            raise ValueError(
+                f"Query embedding dimension {query_embedding.shape[-1]} does not match "
+                f"corpus dimension {self._embeddings.shape[-1]}. This usually means the "
+                f"corpus was embedded with a different model/backend than the query — "
+                f"re-run ingestion with a matching embed_model/embed_backend."
+            )
         query_norm  = query_embedding / (np.linalg.norm(query_embedding) + 1e-10)
         corpus_norm = self._embeddings / (
             np.linalg.norm(self._embeddings, axis=1, keepdims=True) + 1e-10
@@ -132,6 +139,13 @@ class FaissVectorStore:
         return embeddings / norms
 
     def search(self, query_embedding: np.ndarray, top_k: int) -> List[Tuple[int, float]]:
+        if query_embedding.shape[-1] != self._dim:
+            raise ValueError(
+                f"Query embedding dimension {query_embedding.shape[-1]} does not match "
+                f"corpus dimension {self._dim}. This usually means the corpus was "
+                f"embedded with a different model/backend than the query — re-run "
+                f"ingestion with a matching embed_model/embed_backend."
+            )
         query = self._normalize(query_embedding.reshape(1, -1).astype(np.float32))
         top_k = min(top_k, self._n)
         scores, indices = self._index.search(query, top_k)

@@ -54,6 +54,41 @@ def test_numpy_store_rejects_1d_input():
         NumpyVectorStore(np.array([1.0, 2.0, 3.0]))
 
 
+def test_numpy_store_rejects_query_dimension_mismatch():
+    store = NumpyVectorStore(np.array([[1.0, 0.0, 0.0]]))
+    with pytest.raises(ValueError, match="dimension"):
+        store.search(np.array([1.0, 0.0]), top_k=1)
+
+
+def test_numpy_store_negative_similarity_ranked_last():
+    corpus = np.array([[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0]])
+    store = NumpyVectorStore(corpus)
+    hits = store.search(np.array([1.0, 0.0]), top_k=3)
+    assert hits[-1][0] == 1  # the opposite vector scores lowest
+    assert hits[-1][1] == pytest.approx(-1.0, abs=1e-6)
+
+
+def test_numpy_store_handles_tied_scores():
+    corpus = np.array([[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]])
+    store = NumpyVectorStore(corpus)
+    hits = store.search(np.array([1.0, 0.0]), top_k=3)
+    assert len(hits) == 3
+    assert all(score == pytest.approx(1.0, abs=1e-6) for _, score in hits)
+    assert sorted(idx for idx, _ in hits) == [0, 1, 2]  # every tied vector still returned
+
+
+def test_numpy_store_single_dimension_vectors():
+    # Cosine similarity is magnitude-invariant: any positive 1-D vector is
+    # perfectly aligned with a positive query regardless of scale, so 5.0
+    # and 0.5 tie at score 1.0 — only sign (direction) affects the score.
+    store = NumpyVectorStore(np.array([[5.0], [-3.0], [0.5]]))
+    hits = store.search(np.array([1.0]), top_k=3)
+    scores_by_index = {idx: score for idx, score in hits}
+    assert scores_by_index[0] == pytest.approx(1.0, abs=1e-6)
+    assert scores_by_index[2] == pytest.approx(1.0, abs=1e-6)
+    assert scores_by_index[1] == pytest.approx(-1.0, abs=1e-6)
+
+
 def test_numpy_store_save_load_roundtrip(tmp_path):
     corpus = np.array([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]], dtype=np.float32)
     store = NumpyVectorStore(corpus)
@@ -114,6 +149,20 @@ class TestFaissVectorStore:
 
         loaded = FaissVectorStore.load(tmp_path)
         assert len(loaded) == len(store)
+
+    def test_rejects_query_dimension_mismatch(self):
+        from rag.vector_store import FaissVectorStore
+
+        store = FaissVectorStore(np.array([[1.0, 0.0, 0.0]], dtype=np.float32))
+        with pytest.raises(ValueError, match="dimension"):
+            store.search(np.array([1.0, 0.0], dtype=np.float32), top_k=1)
+
+    def test_top_k_clamped_to_size(self):
+        from rag.vector_store import FaissVectorStore
+
+        store = FaissVectorStore(np.array([[1.0, 0.0]], dtype=np.float32))
+        hits = store.search(np.array([1.0, 0.0], dtype=np.float32), top_k=10)
+        assert len(hits) == 1
 
 
 def test_faiss_backend_raises_clear_error_when_not_installed(monkeypatch):
