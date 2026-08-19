@@ -179,6 +179,22 @@ docker compose down          # stop, keep volumes (models + cache)
 docker compose down -v       # stop and wipe volumes — next run re-pulls everything
 ```
 
+**Verified working end-to-end** (build → ingest → retrieve → generate →
+validate, real Ollama calls, not stubs) on a host with Docker Desktop's VM
+capped at 3.83 GB RAM. `mistral` (the default `GEN_MODEL`, ~4.4 GB) got
+OOM-killed on load at that memory ceiling — that's a host resource limit,
+not a pipeline bug, confirmed by pulling a small model directly and getting
+a clean generation. `ollama-pull`, `api`, and `ui` all read `EMBED_MODEL` /
+`GEN_MODEL` overrides for exactly this case:
+
+```bash
+GEN_MODEL=qwen2.5:0.5b docker compose up --build
+```
+
+Mistral needs roughly 5-6 GB of free RAM to load; raise Docker Desktop's
+memory allocation (Settings → Resources) if you'd rather keep the default
+model.
+
 ---
 
 ## ☁️ Hosted / Public Demo
@@ -305,7 +321,7 @@ GEN_MODEL      = os.environ.get("GEN_MODEL", ...)             # per-backend defa
 
 ## ✅ Testing
 
-140 tests across two layers:
+148 tests across two layers:
 
 - **Unit tests** for every pure-function module — chunking, vector search, retrieval,
   schema validation, prompt construction, HTTP config, backend dispatch — including
@@ -482,11 +498,11 @@ The system is designed to be extended without modifying core pipeline logic:
 
 | Status | Priority | Item | Notes |
 |---|---|---|---|
-| ✅ Done | — | Unit + integration tests, CI | `tests/` (140 tests) + `.github/workflows/ci.yml`, see Testing |
+| ✅ Done | — | Unit + integration tests, CI | `tests/` (148 tests) + `.github/workflows/ci.yml`, see Testing |
 | ✅ Done | High | Persist corpus embeddings | `rag/ingestion.py::ingest(cache_dir=...)` — fingerprinted on content + config, skips re-embedding on a cache hit |
 | ✅ Done | High | Pluggable vector store (NumPy / FAISS) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
 | ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR, hit-rate@k, precision@k against a 15-query golden set. Scoped-down alternative to RAGAS (no LLM judge, no cloud dependency); see `eval/README.md`. **Not yet run** — needs a live Ollama instance |
-| ✅ Done | High | Containerize (Docker) | `Dockerfile` + `docker-compose.yml` — `ollama` + `api` + `ui`, one-shot model pull, persistent volumes |
+| ✅ Done | High | Containerize (Docker) | `Dockerfile` + `docker-compose.yml`, verified end-to-end (real ingestion, retrieval, generation) — see Run With Docker |
 | 🟡 Partial | Medium | Hosted demo | `EMBED_BACKEND=local` / `GEN_BACKEND=anthropic`\|`groq` implemented and tested, see [Hosted / Public Demo](#-hosted--public-demo) — actual deployment to Streamlit Cloud/HF Spaces not yet done |
 | ⬜ | Medium | Qdrant/Pinecone backend | New `VectorStore` implementation for true horizontal scale beyond FAISS's single-process index |
 | ⬜ | Medium | PDF ingestion | Extend `rag/ingestion.py` with `pypdf`; no pipeline changes needed |
