@@ -13,6 +13,12 @@ try:
 except ImportError:
     FAISS_AVAILABLE = False
 
+try:
+    import qdrant_client  # noqa: F401
+    QDRANT_AVAILABLE = True
+except ImportError:
+    QDRANT_AVAILABLE = False
+
 
 # ── NumpyVectorStore ─────────────────────────────────────────────────────────
 
@@ -171,3 +177,74 @@ def test_faiss_backend_raises_clear_error_when_not_installed(monkeypatch):
 
     with pytest.raises(ImportError, match="faiss-cpu"):
         build_vector_store(np.array([[1.0, 0.0]]), backend="faiss")
+
+
+# ── Qdrant backend (skipped if qdrant-client is not installed) ──────────────
+
+@pytest.mark.skipif(not QDRANT_AVAILABLE, reason="qdrant-client not installed")
+class TestQdrantVectorStore:
+    def test_ranking_matches_numpy_backend(self):
+        from rag.vector_store import QdrantVectorStore
+
+        rng = np.random.default_rng(seed=42)
+        corpus = rng.random((20, 8)).astype(np.float32)
+        query = rng.random(8).astype(np.float32)
+
+        numpy_hits = NumpyVectorStore(corpus).search(query, top_k=5)
+        qdrant_hits = QdrantVectorStore(corpus).search(query, top_k=5)
+
+        numpy_order = [idx for idx, _ in numpy_hits]
+        qdrant_order = [idx for idx, _ in qdrant_hits]
+        assert numpy_order == qdrant_order
+        for (_, n_score), (_, q_score) in zip(numpy_hits, qdrant_hits):
+            assert n_score == pytest.approx(q_score, abs=1e-4)
+
+    def test_save_load_roundtrip(self, tmp_path):
+        from rag.vector_store import QdrantVectorStore
+
+        corpus = np.array([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]], dtype=np.float32)
+        store = QdrantVectorStore(corpus)
+        store.save(tmp_path)
+
+        loaded = QdrantVectorStore.load(tmp_path)
+        assert len(loaded) == len(store)
+
+        query = np.array([1.0, 0.0], dtype=np.float32)
+        original_hits = store.search(query, top_k=3)
+        loaded_hits = loaded.search(query, top_k=3)
+        assert [idx for idx, _ in original_hits] == [idx for idx, _ in loaded_hits]
+
+    def test_rejects_query_dimension_mismatch(self):
+        from rag.vector_store import QdrantVectorStore
+
+        store = QdrantVectorStore(np.array([[1.0, 0.0, 0.0]], dtype=np.float32))
+        with pytest.raises(ValueError, match="dimension"):
+            store.search(np.array([1.0, 0.0], dtype=np.float32), top_k=1)
+
+    def test_top_k_clamped_to_size(self):
+        from rag.vector_store import QdrantVectorStore
+
+        store = QdrantVectorStore(np.array([[1.0, 0.0]], dtype=np.float32))
+        hits = store.search(np.array([1.0, 0.0], dtype=np.float32), top_k=10)
+        assert len(hits) == 1
+
+    def test_top_k_zero_returns_no_results(self):
+        from rag.vector_store import QdrantVectorStore
+
+        store = QdrantVectorStore(np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32))
+        hits = store.search(np.array([1.0, 0.0], dtype=np.float32), top_k=0)
+        assert hits == []
+
+    def test_len(self):
+        from rag.vector_store import QdrantVectorStore
+
+        store = QdrantVectorStore(np.array([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]], dtype=np.float32))
+        assert len(store) == 3
+
+
+def test_qdrant_backend_raises_clear_error_when_not_installed(monkeypatch):
+    if QDRANT_AVAILABLE:
+        pytest.skip("qdrant-client is installed — this test targets the missing-dependency path")
+
+    with pytest.raises(ImportError, match="qdrant-client"):
+        build_vector_store(np.array([[1.0, 0.0]]), backend="qdrant")

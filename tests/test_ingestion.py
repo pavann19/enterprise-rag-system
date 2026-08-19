@@ -176,3 +176,19 @@ def test_ingest_cache_roundtrip_with_faiss_backend(corpus_dir, fake_embed, tmp_p
     assert fake_embed["n"] == 1  # cache hit, no re-embedding
     assert chunks1 == chunks2
     assert len(store1) == len(store2)
+
+
+@pytest.mark.skipif(
+    __import__("importlib").util.find_spec("qdrant_client") is None,
+    reason="qdrant-client not installed",
+)
+def test_ingest_cache_roundtrip_with_qdrant_backend(corpus_dir, fake_embed, tmp_path):
+    cache_dir = tmp_path / ".cache"
+
+    chunks1, metadata1, store1 = ingest(corpus_dir, cache_dir=cache_dir, backend="qdrant")
+    assert fake_embed["n"] == 1
+
+    chunks2, metadata2, store2 = ingest(corpus_dir, cache_dir=cache_dir, backend="qdrant")
+    assert fake_embed["n"] == 1  # cache hit, no re-embedding
+    assert chunks1 == chunks2
+    assert len(store1) == len(store2)

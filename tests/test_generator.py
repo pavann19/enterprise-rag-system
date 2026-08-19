@@ -1,5 +1,6 @@
 import pytest
 
+import rag.generator as generator_module
 from rag.generator import generate_answer, _build_prompt
 
 
@@ -55,9 +56,12 @@ def test_generate_answer_rejects_empty_passages():
         generate_answer("a question", [])
 
 
-def test_generate_answer_propagates_connection_error_when_ollama_down():
-    # No Ollama server is running in the test environment, and DEFAULT_GEN_MODEL's
-    # host (localhost:11434) is not reachable — this exercises the real failure path
-    # without requiring a live Ollama instance.
+def test_generate_answer_propagates_connection_error_when_ollama_down(monkeypatch):
+    # Point at a guaranteed-unreachable port (nothing listens on :1) rather
+    # than relying on the environment's real OLLAMA_HOST being free — that
+    # assumption broke once a real Ollama instance was actually running on
+    # localhost:11434 during Docker verification, turning this into a slow
+    # 60s timeout instead of an immediate, deterministic connection refusal.
+    monkeypatch.setattr(generator_module, "GENERATE_URL", "http://localhost:1/api/generate")
     with pytest.raises(ConnectionError):
         generate_answer("a question", ["some context"])

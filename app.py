@@ -40,7 +40,7 @@ CACHE_DIR      = Path(__file__).parent / ".cache" / "corpus"
 CHUNK_SIZE     = 300
 CHUNK_OVERLAP  = 50
 TOP_K          = 3
-VECTOR_BACKEND = "numpy"   # or "faiss" — see rag/vector_store.py
+VECTOR_BACKEND = os.environ.get("VECTOR_BACKEND") or "numpy"   # or "faiss"/"qdrant" — see rag/vector_store.py
 
 # Embedding: "ollama" (default, local, needs OLLAMA_HOST reachable) or
 # "local" (sentence-transformers, in-process, no server — hosted demos).

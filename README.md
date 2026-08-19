@@ -56,7 +56,7 @@ This system is built for containerized microservice environments. The RAG pipeli
 | **Integration** | REST API (`/query`, `/health`) designed for backend-to-backend consumption |
 | **Agentic AI Ready** | Strict `RAGResponse` typing ensures predictable tool usage for autonomous agents |
 | **Data Residency** | Inference runs on local infrastructure by default (`EMBED_BACKEND=ollama`, `GEN_BACKEND=ollama`); switching either to its cloud alternative is a deliberate, explicit config choice — never an implicit fallback |
-| **Vector Storage** | NumPy baseline for prototyping; designed for zero-friction scaling to FAISS or Qdrant |
+| **Vector Storage** | NumPy baseline for prototyping; swappable to FAISS or Qdrant via `VECTOR_BACKEND` |
 
 This architecture bridges the gap between secure local LLM execution and scalable enterprise service patterns.
 
@@ -75,7 +75,7 @@ Each pipeline stage is an independent Python module with a single responsibility
 | `rag/ingestion.py` | Multi-document loading, chunking, and embedding | Ollama `/api/embeddings` |
 | `rag/chunker.py` | Word-boundary text segmentation | None |
 | `rag/embedder.py` | Dense vector encoding | Ollama `/api/embeddings` (default) or in-process sentence-transformers |
-| `rag/vector_store.py` | Pluggable similarity index (NumPy / FAISS), with save/load | None |
+| `rag/vector_store.py` | Pluggable similarity index (NumPy / FAISS / Qdrant), with save/load | None |
 | `rag/retriever.py` | Translates vector-store hits into chunk text + source metadata | None |
 | `rag/generator.py` | Context-grounded generation | Ollama `/api/generate` (default), Claude API, or Groq API |
 | `validator/json_validator.py` | Output schema enforcement | None |
@@ -96,14 +96,15 @@ class RAGResponse(TypedDict):
 
 ### 3. Pluggable Vector Store, With Persistence
 
-Similarity search is hidden behind a `VectorStore` interface (`rag/vector_store.py`) with two interchangeable backends:
+Similarity search is hidden behind a `VectorStore` interface (`rag/vector_store.py`) with three interchangeable backends:
 
 - **`numpy`** (default) — exact cosine similarity over a `float32` array. Zero extra dependencies.
 - **`faiss`** (optional, `pip install faiss-cpu`) — exact inner-product search via `IndexFlatIP` over L2-normalized vectors, same ranking semantics, backed by a purpose-built similarity-search library.
+- **`qdrant`** (optional, `pip install qdrant-client`) — cosine search via Qdrant's embedded/local mode, no Qdrant server to run. **Note the tradeoff:** `save()`/`load()` persist the raw embedding matrix and rebuild an in-memory collection on load, the same way `numpy` does — not Qdrant's own on-disk index format. That was the faster path to something genuinely working end to end; Qdrant's own local-mode storage holds an exclusive file lock for as long as a client has it open, which doesn't fit this project's ingest-once/query-later-in-a-different-process cache pattern without extra lock handling. If you're evaluating Qdrant specifically for its storage engine rather than its query API, know that this backend gives you the latter, not the former.
 
 `rag/retriever.py` calls `vector_store.search()` and has no idea which backend is underneath — swapping backends is a one-line config change (`VECTOR_BACKEND` in `app.py`), not a rewrite.
 
-Both backends persist to disk. `rag/ingestion.py::ingest()` accepts a `cache_dir`; the embedded corpus (chunks, metadata, and the index itself) is cached under a fingerprint hashed from document contents + chunking/embedding config. An unchanged corpus loads straight from disk on the next run — no re-embedding, no Ollama calls — until a document or config actually changes.
+All three backends persist to disk. `rag/ingestion.py::ingest()` accepts a `cache_dir`; the embedded corpus (chunks, metadata, and the index itself) is cached under a fingerprint hashed from document contents + chunking/embedding config. An unchanged corpus loads straight from disk on the next run — no re-embedding, no Ollama calls — until a document or config actually changes.
 
 ### 4. Single Transport Layer
 
@@ -297,7 +298,7 @@ the process starts:
 CHUNK_SIZE     = 300           # approximate characters per chunk
 CHUNK_OVERLAP  = 50            # character overlap between chunks
 TOP_K          = 3             # passages injected into the generation prompt
-VECTOR_BACKEND = "numpy"       # or "faiss" — see rag/vector_store.py
+VECTOR_BACKEND = os.environ.get("VECTOR_BACKEND") or "numpy"   # or "faiss"/"qdrant"
 CACHE_DIR      = Path(...) / ".cache" / "corpus"   # persisted embeddings; delete to force re-embedding
 
 EMBED_BACKEND  = os.environ.get("EMBED_BACKEND", "ollama")   # or "local" (sentence-transformers)
@@ -316,12 +317,15 @@ GEN_MODEL      = os.environ.get("GEN_MODEL", ...)             # per-backend defa
 | `GEN_MODEL` | model name | backend-specific | `mistral` (ollama) / `claude-haiku-4-5-20251001` (anthropic) / `llama-3.3-70b-versatile` (groq) |
 | `ANTHROPIC_API_KEY` | API key | — | Required only when `GEN_BACKEND=anthropic` |
 | `GROQ_API_KEY` | API key | — | Required only when `GEN_BACKEND=groq`. **Never write the key itself into a tracked file** — set it as an actual environment variable, a gitignored `.env`, or your host's secrets manager |
+| `VECTOR_BACKEND` | `numpy` \| `faiss` \| `qdrant` | `numpy` | `faiss`/`qdrant` need their package uncommented in `requirements.txt` |
+
+Copy [`.env.example`](.env.example) to `.env` to set any of these locally — `.env` is gitignored, and `docker-compose.yml` reads it automatically.
 
 ---
 
 ## ✅ Testing
 
-148 tests across two layers:
+155 tests across two layers:
 
 - **Unit tests** for every pure-function module — chunking, vector search, retrieval,
   schema validation, prompt construction, HTTP config, backend dispatch — including
@@ -471,8 +475,8 @@ The system is designed to be extended without modifying core pipeline logic:
 
 | Extension | How |
 |---|---|
-| **Swap retrieval backend** | Set `VECTOR_BACKEND = "faiss"` in `app.py`; `retrieve()` signature unchanged |
-| **Swap to Qdrant/Pinecone at scale** | Add a new backend class to `rag/vector_store.py` implementing `search()`/`save()`/`load()` |
+| **Swap retrieval backend** | Set `VECTOR_BACKEND=faiss` or `qdrant`; `retrieve()` signature unchanged |
+| **Swap to Pinecone/a hosted Qdrant server at scale** | Add a new backend class to `rag/vector_store.py` implementing `search()`/`save()`/`load()` |
 | **Swap embedding model** | Change `EMBED_MODEL` constant in `app.py`; no code changes elsewhere |
 | **Swap generation model** | Change `GEN_MODEL` constant in `app.py`; no code changes elsewhere |
 | **Add streaming output** | Pass `"stream": true` to `generator.py`; yield tokens progressively |
@@ -498,13 +502,12 @@ The system is designed to be extended without modifying core pipeline logic:
 
 | Status | Priority | Item | Notes |
 |---|---|---|---|
-| ✅ Done | — | Unit + integration tests, CI | `tests/` (148 tests) + `.github/workflows/ci.yml`, see Testing |
+| ✅ Done | — | Unit + integration tests, CI | `tests/` (155 tests) + `.github/workflows/ci.yml`, see Testing |
 | ✅ Done | High | Persist corpus embeddings | `rag/ingestion.py::ingest(cache_dir=...)` — fingerprinted on content + config, skips re-embedding on a cache hit |
-| ✅ Done | High | Pluggable vector store (NumPy / FAISS) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
+| ✅ Done | High | Pluggable vector store (NumPy / FAISS / Qdrant) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
 | ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR, hit-rate@k, precision@k against a 15-query golden set. Scoped-down alternative to RAGAS (no LLM judge, no cloud dependency); see `eval/README.md`. **Not yet run** — needs a live Ollama instance |
 | ✅ Done | High | Containerize (Docker) | `Dockerfile` + `docker-compose.yml`, verified end-to-end (real ingestion, retrieval, generation) — see Run With Docker |
 | 🟡 Partial | Medium | Hosted demo | `EMBED_BACKEND=local` / `GEN_BACKEND=anthropic`\|`groq` implemented and tested, see [Hosted / Public Demo](#-hosted--public-demo) — actual deployment to Streamlit Cloud/HF Spaces not yet done |
-| ⬜ | Medium | Qdrant/Pinecone backend | New `VectorStore` implementation for true horizontal scale beyond FAISS's single-process index |
 | ⬜ | Medium | PDF ingestion | Extend `rag/ingestion.py` with `pypdf`; no pipeline changes needed |
 | ✅ Done | Medium | Integration tests for `service/api.py` / `streamlit_app.py` | FastAPI `TestClient` + Streamlit `AppTest`, ingestion/generation stubbed — see Testing |
 | ⬜ | Medium | Answer-quality evaluation (faithfulness/relevancy) | Requires an LLM judge — local model or cloud API; deliberately deferred, see `eval/README.md` |
@@ -520,7 +523,7 @@ The system is designed to be extended without modifying core pipeline logic:
 
 **Deterministic Structured Output:** Rather than returning raw text, the output is passed through `json_validator.py`. It enforces a `RAGResponse` TypedDict schema and raises a `ValidationError` on failure, ensuring reliable integration with downstream enterprise APIs.
 
-**Decoupled Architecture:** Retrieval (`retriever.py`) and Generation (`generator.py`) are strictly independent modules. This allows for isolated unit testing and enables the system to easily swap the lightweight NumPy vector store for FAISS or Pinecone at massive scale.
+**Decoupled Architecture:** Retrieval (`retriever.py`) and Generation (`generator.py`) are strictly independent modules. This allows for isolated unit testing and enables the system to easily swap the lightweight NumPy vector store for FAISS or Qdrant at scale.
 
 **Shared HTTP Transport:** A single `_http.py` module handles all Ollama communication, eliminating boilerplate and centralizing timeout and error handling.
 

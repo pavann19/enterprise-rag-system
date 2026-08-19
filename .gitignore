@@ -44,3 +44,11 @@ htmlcov/
 
 # Evaluation run output (eval/run_eval.py) — regenerated on demand
 eval/results/
+
+# Local secrets — API keys belong here or in a real secrets manager,
+# never in a tracked file. docker-compose.yml and .streamlit/secrets.toml
+# both read from this / an equivalent local-only source.
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml

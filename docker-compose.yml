@@ -31,6 +31,10 @@ services:
     entrypoint: ["/bin/sh", "-c", "ollama pull ${EMBED_MODEL:-nomic-embed-text} && ollama pull ${GEN_MODEL:-mistral}"]
     restart: "no"
 
+  # Note: VECTOR_BACKEND=faiss/qdrant and GEN_BACKEND=anthropic/groq each
+  # need their package uncommented in requirements.txt (see that file) —
+  # picking a backend without its dependency installed fails with a clear
+  # ImportError at ingest/generate time, not silently.
   api:
     build: .
     command: uvicorn service.api:app --host 0.0.0.0 --port 8000
@@ -39,8 +43,13 @@ services:
         condition: service_completed_successfully
     environment:
       OLLAMA_HOST: "http://ollama:11434"
+      EMBED_BACKEND: "${EMBED_BACKEND:-}"
       EMBED_MODEL: "${EMBED_MODEL:-}"
+      GEN_BACKEND: "${GEN_BACKEND:-}"
       GEN_MODEL: "${GEN_MODEL:-}"
+      VECTOR_BACKEND: "${VECTOR_BACKEND:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
     ports:
       - "8000:8000"
     volumes:
@@ -61,8 +70,13 @@ services:
         condition: service_completed_successfully
     environment:
       OLLAMA_HOST: "http://ollama:11434"
+      EMBED_BACKEND: "${EMBED_BACKEND:-}"
       EMBED_MODEL: "${EMBED_MODEL:-}"
+      GEN_BACKEND: "${GEN_BACKEND:-}"
       GEN_MODEL: "${GEN_MODEL:-}"
+      VECTOR_BACKEND: "${VECTOR_BACKEND:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
     ports:
       - "8501:8501"
     volumes:

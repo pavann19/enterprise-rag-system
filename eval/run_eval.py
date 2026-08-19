@@ -134,7 +134,7 @@ def main() -> None:
                          help="top-k cutoffs to report hit-rate/precision at")
     parser.add_argument("--top-k-retrieved", type=int, default=5,
                          help="how many passages retrieve() returns per query")
-    parser.add_argument("--backend", default=VECTOR_BACKEND, choices=["numpy", "faiss"])
+    parser.add_argument("--backend", default=VECTOR_BACKEND, choices=["numpy", "faiss", "qdrant"])
     args = parser.parse_args()
 
     try:

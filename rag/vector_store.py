@@ -3,15 +3,20 @@ rag/vector_store.py
 --------------------
 Pluggable vector-index backend, decoupled from retrieval logic.
 
-Two backends implement the same `VectorStore` interface:
-  - NumpyVectorStore: exact cosine similarity over an in-memory float32
+Three backends implement the same `VectorStore` interface:
+  - NumpyVectorStore:  exact cosine similarity over an in-memory float32
                        array. Zero extra dependencies. Default backend.
-  - FaissVectorStore: exact inner-product search over a FAISS
+  - FaissVectorStore:  exact inner-product search over a FAISS
                        IndexFlatIP, built from L2-normalized vectors
                        (so inner product == cosine similarity). Optional —
                        requires `pip install faiss-cpu`.
+  - QdrantVectorStore: cosine search via qdrant-client's embedded/local
+                       mode (no Qdrant server to run). Optional — requires
+                       `pip install qdrant-client`. See that class's
+                       docstring for how its save()/load() differs from
+                       the other two backends.
 
-Both backends support save()/load() so a corpus only needs to be embedded
+All three support save()/load() so a corpus only needs to be embedded
 once; subsequent runs load the persisted index from disk. See
 rag/ingestion.py for the cache-hit/cache-miss logic that uses this.
 
@@ -181,11 +186,96 @@ class FaissVectorStore:
         return self._n
 
 
+# ── Qdrant backend (optional) ────────────────────────────────────────────────
+
+class QdrantVectorStore:
+    """Cosine search via qdrant-client's embedded/local mode.
+
+    Uses `QdrantClient(":memory:")` — no Qdrant server process, works
+    anywhere the other two backends do (Docker, hosted demos). This is a
+    deliberate simplification: Qdrant's own on-disk local mode
+    (`QdrantClient(path=...)`) holds an exclusive file lock for as long as
+    the client is open, which doesn't fit this project's ingest-once/
+    query-many-times-in-a-different-process-later cache pattern without
+    extra lock-lifecycle handling. Instead, save()/load() persist the raw
+    embedding matrix (same as NumpyVectorStore) and load() rebuilds an
+    in-memory Qdrant collection from it. You get Qdrant's query engine and
+    ranking behavior; you do not get Qdrant's own on-disk index format —
+    call this out if you're evaluating Qdrant specifically for its
+    storage engine rather than its API.
+    """
+
+    _EMBEDDINGS_FILENAME = "qdrant_embeddings.npy"
+    _COLLECTION_NAME      = "corpus"
+
+    def __init__(self, embeddings: np.ndarray):
+        try:
+            from qdrant_client import QdrantClient
+            from qdrant_client.models import Distance, PointStruct, VectorParams
+        except ImportError as exc:
+            raise ImportError(
+                "qdrant-client is not installed. Run: pip install qdrant-client\n"
+                "Or use backend='numpy' (the default) instead."
+            ) from exc
+
+        if embeddings.ndim != 2:
+            raise ValueError(f"embeddings must be 2-D, got shape {embeddings.shape}")
+
+        self._embeddings = embeddings.astype(np.float32, copy=False)
+        self._dim        = self._embeddings.shape[1]
+        self._client = QdrantClient(":memory:")
+        self._client.create_collection(
+            self._COLLECTION_NAME,
+            vectors_config=VectorParams(size=self._dim, distance=Distance.COSINE),
+        )
+        if len(self._embeddings) > 0:
+            self._client.upsert(
+                self._COLLECTION_NAME,
+                points=[
+                    PointStruct(id=i, vector=vec.tolist(), payload={})
+                    for i, vec in enumerate(self._embeddings)
+                ],
+            )
+
+    def search(self, query_embedding: np.ndarray, top_k: int) -> List[Tuple[int, float]]:
+        if query_embedding.shape[-1] != self._dim:
+            raise ValueError(
+                f"Query embedding dimension {query_embedding.shape[-1]} does not match "
+                f"corpus dimension {self._dim}. This usually means the corpus was "
+                f"embedded with a different model/backend than the query — re-run "
+                f"ingestion with a matching embed_model/embed_backend."
+            )
+        top_k = min(top_k, len(self._embeddings))
+        if top_k == 0:
+            return []
+        hits = self._client.query_points(
+            self._COLLECTION_NAME,
+            query=query_embedding.astype(np.float32).tolist(),
+            limit=top_k,
+        ).points
+        return [(int(hit.id), float(hit.score)) for hit in hits]
+
+    def save(self, path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+        np.save(path / self._EMBEDDINGS_FILENAME, self._embeddings)
+        log.info("QdrantVectorStore saved — %d vectors → %s", len(self), path)
+
+    @classmethod
+    def load(cls, path: Path) -> "QdrantVectorStore":
+        embeddings = np.load(path / cls._EMBEDDINGS_FILENAME)
+        log.info("QdrantVectorStore loaded — %d vectors ← %s", len(embeddings), path)
+        return cls(embeddings)
+
+    def __len__(self) -> int:
+        return len(self._embeddings)
+
+
 # ── Factory ────────────────────────────────────────────────────────────────
 
 _BACKENDS = {
-    "numpy": NumpyVectorStore,
-    "faiss": FaissVectorStore,
+    "numpy":  NumpyVectorStore,
+    "faiss":  FaissVectorStore,
+    "qdrant": QdrantVectorStore,
 }
 
 
@@ -195,11 +285,11 @@ def build_vector_store(embeddings: np.ndarray, backend: str = "numpy") -> Vector
 
     Args:
         embeddings: 2-D float array, shape (n_chunks, dim).
-        backend:    "numpy" (default, zero extra deps) or "faiss".
+        backend:    "numpy" (default, zero extra deps), "faiss", or "qdrant".
 
     Raises:
         ValueError:  If backend is not a known name.
-        ImportError: If backend="faiss" but faiss is not installed.
+        ImportError: If the selected backend's package is not installed.
     """
     if backend not in _BACKENDS:
         raise ValueError(

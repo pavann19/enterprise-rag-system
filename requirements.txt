@@ -19,6 +19,10 @@ httpx>=0.27.0               # required by fastapi.testclient.TestClient (tests/t
 # Uncomment to enable backend="faiss" in app.py / service/api.py / streamlit_app.py:
 # faiss-cpu>=1.8.0
 
+# Optional — Qdrant vector store backend (rag/vector_store.py), embedded/
+# local mode — no Qdrant server to run. Uncomment to enable backend="qdrant":
+# qdrant-client>=1.9.0
+
 # Optional — EMBED_BACKEND=local (rag/embedder.py). Runs embeddings
 # in-process instead of calling Ollama — needed for hosted demos where a
 # background Ollama server can't run (Streamlit Community Cloud, HF Spaces).
