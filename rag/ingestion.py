@@ -30,25 +30,25 @@ directory and restart — no code changes required.
 import hashlib
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
-from rag.chunker         import chunk_text
-from rag.embedder        import embed_texts
-from rag.loaders         import SUPPORTED_EXTENSIONS, load_document_text
-from rag.logging_config  import get_logger
-from rag.vector_store    import VectorStore, build_vector_store, load_vector_store
+from rag.chunker import chunk_text
+from rag.embedder import embed_texts
+from rag.loaders import SUPPORTED_EXTENSIONS, load_document_text
+from rag.logging_config import get_logger
+from rag.vector_store import VectorStore, build_vector_store, load_vector_store
 
 log = get_logger(__name__)
 
-_CHUNKS_FILENAME   = "chunks.json"
+_CHUNKS_FILENAME = "chunks.json"
 _METADATA_FILENAME = "metadata.json"
 _MANIFEST_FILENAME = "manifest.json"
 
 
 # ── Cache key ──────────────────────────────────────────────────────────────────
 
+
 def _corpus_fingerprint(
-    doc_files: List[Path],
+    doc_files: list[Path],
     chunk_size: int,
     chunk_overlap: int,
     embed_model: str,
@@ -71,25 +71,23 @@ def _corpus_fingerprint(
     hasher.update(
         f"|chunk_size={chunk_size}|overlap={chunk_overlap}"
         f"|embed_model={embed_model}|embed_backend={embed_backend}"
-        f"|backend={backend}".encode("utf-8")
+        f"|backend={backend}".encode()
     )
     return hasher.hexdigest()[:16]
 
 
-def _load_from_cache(
-    cache_path: Path, backend: str
-) -> Tuple[List[str], List[Dict[str, str]], VectorStore]:
-    chunks   = json.loads((cache_path / _CHUNKS_FILENAME).read_text(encoding="utf-8"))
+def _load_from_cache(cache_path: Path, backend: str) -> tuple[list[str], list[dict[str, str]], VectorStore]:
+    chunks = json.loads((cache_path / _CHUNKS_FILENAME).read_text(encoding="utf-8"))
     metadata = json.loads((cache_path / _METADATA_FILENAME).read_text(encoding="utf-8"))
-    store    = load_vector_store(cache_path, backend=backend)
+    store = load_vector_store(cache_path, backend=backend)
     return chunks, metadata, store
 
 
 def _save_to_cache(
     cache_path: Path,
     fingerprint: str,
-    chunks: List[str],
-    metadata: List[Dict[str, str]],
+    chunks: list[str],
+    metadata: list[dict[str, str]],
     store: VectorStore,
     backend: str,
 ) -> None:
@@ -105,15 +103,16 @@ def _save_to_cache(
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
+
 def ingest(
     data_dir: Path,
-    chunk_size: int         = 300,
-    chunk_overlap: int      = 50,
-    embed_model: str        = None,
-    embed_backend: str      = None,
-    backend: str            = "numpy",
-    cache_dir: Optional[Path] = None,
-) -> Tuple[List[str], List[Dict[str, str]], VectorStore]:
+    chunk_size: int = 300,
+    chunk_overlap: int = 50,
+    embed_model: str = None,
+    embed_backend: str = None,
+    backend: str = "numpy",
+    cache_dir: Path | None = None,
+) -> tuple[list[str], list[dict[str, str]], VectorStore]:
     """
     Walks data_dir, loads every supported document (.txt, .pdf — see
     rag/loaders.py), chunks each independently, and builds a VectorStore
@@ -156,11 +155,7 @@ def ingest(
                             (only on a cache miss — a cache hit needs no embedding call).
     """
     log.info("Ingestion started — scanning %s", data_dir)
-    doc_files = sorted(
-        path
-        for ext in SUPPORTED_EXTENSIONS
-        for path in Path(data_dir).glob(f"*{ext}")
-    )
+    doc_files = sorted(path for ext in SUPPORTED_EXTENSIONS for path in Path(data_dir).glob(f"*{ext}"))
     if not doc_files:
         raise FileNotFoundError(
             f"No supported documents ({', '.join(SUPPORTED_EXTENSIONS)}) found in "
@@ -171,7 +166,7 @@ def ingest(
     fingerprint = _corpus_fingerprint(
         doc_files, chunk_size, chunk_overlap, embed_model, embed_backend, backend
     )
-    cache_path  = (cache_dir / fingerprint) if cache_dir is not None else None
+    cache_path = (cache_dir / fingerprint) if cache_dir is not None else None
 
     if cache_path is not None and (cache_path / _MANIFEST_FILENAME).exists():
         log.info("Cache hit — loading corpus from %s (no re-embedding)", cache_path)
@@ -180,11 +175,11 @@ def ingest(
     if cache_path is not None:
         log.info("Cache miss — embedding corpus (fingerprint=%s)", fingerprint)
 
-    all_chunks:   List[str]             = []
-    all_metadata: List[Dict[str, str]]  = []
+    all_chunks: list[str] = []
+    all_metadata: list[dict[str, str]] = []
 
     for filepath in doc_files:
-        text   = load_document_text(filepath)
+        text = load_document_text(filepath)
         chunks = chunk_text(text, chunk_size=chunk_size, overlap=chunk_overlap)
         source = filepath.name
 
@@ -195,7 +190,8 @@ def ingest(
 
     log.info(
         "Chunking complete — %d total chunks from %d document(s)",
-        len(all_chunks), len(doc_files),
+        len(all_chunks),
+        len(doc_files),
     )
 
     log.info("Embedding corpus — backend='%s' model='%s' …", embed_backend, embed_model)
@@ -203,7 +199,8 @@ def ingest(
     vector_store = build_vector_store(corpus_embeddings, backend=backend)
     log.info(
         "Ingestion complete — %d vectors indexed (backend=%s)",
-        len(vector_store), backend,
+        len(vector_store),
+        backend,
     )
 
     if cache_path is not None:

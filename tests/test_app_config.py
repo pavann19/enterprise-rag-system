@@ -9,7 +9,6 @@ name. Fixed by switching to `os.environ.get(key) or default`; this test
 locks that behavior in.
 """
 
-import importlib
 import subprocess
 import sys
 
@@ -41,8 +40,12 @@ def _read_config(env_overrides):
 
 def _base_env(**overrides):
     import os
-    env = {k: v for k, v in os.environ.items() if k not in
-            ("EMBED_MODEL", "GEN_MODEL", "EMBED_BACKEND", "GEN_BACKEND")}
+
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("EMBED_MODEL", "GEN_MODEL", "EMBED_BACKEND", "GEN_BACKEND")
+    }
     env.update(overrides)
     return env
 
@@ -64,9 +67,7 @@ def test_empty_string_backend_falls_back_to_default():
 
 
 def test_explicit_model_override_still_wins():
-    embed_model, gen_model, _, _ = _read_config(
-        _base_env(EMBED_MODEL="custom-embed", GEN_MODEL="custom-gen")
-    )
+    embed_model, gen_model, _, _ = _read_config(_base_env(EMBED_MODEL="custom-embed", GEN_MODEL="custom-gen"))
     assert embed_model == "custom-embed"
     assert gen_model == "custom-gen"
 

@@ -12,10 +12,8 @@ context-window constraints of any Ollama embedding model.
 No external calls — operates entirely on local text.
 """
 
-from typing import List
 
-
-def chunk_text(text: str, chunk_size: int = 300, overlap: int = 50) -> List[str]:
+def chunk_text(text: str, chunk_size: int = 300, overlap: int = 50) -> list[str]:
     """
     Splits text into overlapping chunks by word boundaries.
 
@@ -38,8 +36,8 @@ def chunk_text(text: str, chunk_size: int = 300, overlap: int = 50) -> List[str]
         return []
 
     words = text.split()
-    chunks: List[str] = []
-    current_chunk: List[str] = []
+    chunks: list[str] = []
+    current_chunk: list[str] = []
     current_len = 0
 
     for word in words:
@@ -51,7 +49,7 @@ def chunk_text(text: str, chunk_size: int = 300, overlap: int = 50) -> List[str]
             # Keep last `overlap` characters worth of words for context.
             # overlap=0 means no carry-over at all — skip the loop entirely
             # rather than always keeping at least one word.
-            overlap_words: List[str] = []
+            overlap_words: list[str] = []
             if overlap > 0:
                 overlap_len = 0
                 for w in reversed(current_chunk):

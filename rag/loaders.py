@@ -23,9 +23,7 @@ def _load_pdf(filepath: Path) -> str:
     try:
         from pypdf import PdfReader
     except ImportError as exc:
-        raise ImportError(
-            "PDF ingestion requires pypdf.\n  → pip install pypdf"
-        ) from exc
+        raise ImportError("PDF ingestion requires pypdf.\n  → pip install pypdf") from exc
 
     reader = PdfReader(str(filepath))
     page_texts = [page.extract_text() or "" for page in reader.pages]

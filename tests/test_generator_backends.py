@@ -1,4 +1,5 @@
 import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -84,3 +85,118 @@ def test_groq_backend_raises_clear_error_when_api_key_missing(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
         generate_answer("q", ["ctx"], backend="groq")
+
+
+# ── Real backend bodies (client class mocked, not the whole backend
+# function) — the tests above bypass _generate_anthropic/_generate_groq
+# entirely by replacing their _BACKENDS entry, so they never actually
+# exercise those functions' own client-construction/response-parsing logic.
+# These do, via a fake module injected into sys.modules.
+
+
+class _FakeAPIConnectionError(Exception):
+    pass
+
+
+def _fake_anthropic_module(create_side_effect=None, response_text="the anthropic answer"):
+    fake_module = MagicMock()
+    fake_module.APIConnectionError = _FakeAPIConnectionError
+
+    fake_block = MagicMock()
+    fake_block.type = "text"
+    fake_block.text = response_text
+    fake_response = MagicMock()
+    fake_response.content = [fake_block]
+
+    fake_client = MagicMock()
+    if create_side_effect is not None:
+        fake_client.messages.create.side_effect = create_side_effect
+    else:
+        fake_client.messages.create.return_value = fake_response
+    fake_module.Anthropic.return_value = fake_client
+    return fake_module, fake_client
+
+
+def test_anthropic_body_parses_text_blocks_from_response(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
+    fake_module, fake_client = _fake_anthropic_module(response_text="grounded answer")
+
+    with patch.dict(sys.modules, {"anthropic": fake_module}):
+        answer = generate_answer("q", ["ctx"], backend="anthropic", model="claude-haiku-4-5-20251001")
+
+    assert answer == "grounded answer"
+    fake_module.Anthropic.assert_called_once_with(api_key="sk-test-not-real")
+    call_kwargs = fake_client.messages.create.call_args.kwargs
+    assert call_kwargs["model"] == "claude-haiku-4-5-20251001"
+    assert call_kwargs["messages"] == [{"role": "user", "content": call_kwargs["messages"][0]["content"]}]
+
+
+def test_anthropic_body_raises_connection_error_on_api_connection_error(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
+    fake_module, _ = _fake_anthropic_module(create_side_effect=_FakeAPIConnectionError("network down"))
+
+    with patch.dict(sys.modules, {"anthropic": fake_module}):
+        with pytest.raises(ConnectionError, match="Anthropic API unreachable"):
+            generate_answer("q", ["ctx"], backend="anthropic")
+
+
+def _fake_groq_module(create_side_effect=None, response_text="the groq answer"):
+    fake_module = MagicMock()
+    fake_module.APIConnectionError = _FakeAPIConnectionError
+
+    fake_message = MagicMock()
+    fake_message.content = response_text
+    fake_choice = MagicMock()
+    fake_choice.message = fake_message
+    fake_response = MagicMock()
+    fake_response.choices = [fake_choice]
+
+    fake_client = MagicMock()
+    if create_side_effect is not None:
+        fake_client.chat.completions.create.side_effect = create_side_effect
+    else:
+        fake_client.chat.completions.create.return_value = fake_response
+    fake_module.Groq.return_value = fake_client
+    return fake_module, fake_client
+
+
+def test_groq_body_parses_message_content_from_response(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    fake_module, fake_client = _fake_groq_module(response_text="grounded groq answer")
+
+    with patch.dict(sys.modules, {"groq": fake_module}):
+        answer = generate_answer("q", ["ctx"], backend="groq", model="openai/gpt-oss-20b")
+
+    assert answer == "grounded groq answer"
+    fake_module.Groq.assert_called_once_with(api_key="gsk-test-not-real")
+    call_kwargs = fake_client.chat.completions.create.call_args.kwargs
+    assert call_kwargs["model"] == "openai/gpt-oss-20b"
+
+
+def test_groq_body_raises_connection_error_on_api_connection_error(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    fake_module, _ = _fake_groq_module(create_side_effect=_FakeAPIConnectionError("network down"))
+
+    with patch.dict(sys.modules, {"groq": fake_module}):
+        with pytest.raises(ConnectionError, match="Groq API unreachable"):
+            generate_answer("q", ["ctx"], backend="groq")
+
+
+def test_groq_body_handles_none_content_gracefully(monkeypatch):
+    # A real Groq/OpenAI-style response can have message.content == None
+    # (e.g. a tool-call-only response) — must not raise on .strip().
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-real")
+    fake_module, _ = _fake_groq_module(response_text=None)
+
+    with patch.dict(sys.modules, {"groq": fake_module}):
+        answer = generate_answer("q", ["ctx"], backend="groq")
+
+    assert "empty response" in answer.lower()
+
+
+def test_ollama_body_returns_stripped_response_field(monkeypatch):
+    monkeypatch.setattr(
+        generator_module, "ollama_post", lambda url, payload: {"response": "  padded answer  \n"}
+    )
+    answer = generate_answer("q", ["ctx"], backend="ollama")
+    assert answer == "padded answer"

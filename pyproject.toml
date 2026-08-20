@@ -1,0 +1,31 @@
+[tool.coverage.run]
+source = ["app", "streamlit_app", "rag", "service", "validator", "eval"]
+branch = true
+
+[tool.coverage.report]
+# vector_store.py's ImportError branches (faiss/qdrant not installed) are
+# genuinely environment-dependent: whichever isn't installed locally has
+# that branch covered for real by its own test, and the other branch is
+# covered by its happy-path tests instead. Neither environment sees both,
+# so this floor accounts for that split rather than chasing a number that
+# would require simultaneously uninstalling both in CI.
+fail_under = 96
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = [
+    "E501",  # line length is a formatter concern (black), not a lint failure
+]
+
+[tool.black]
+line-length = 110
+target-version = ["py311", "py312"]

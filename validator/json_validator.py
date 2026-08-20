@@ -13,7 +13,7 @@ document filename, enabling cross-document attribution and auditability.
 """
 
 import json
-from typing import Any, Dict, List
+from typing import Any
 
 from typing_extensions import TypedDict
 
@@ -24,21 +24,25 @@ log = get_logger(__name__)
 
 # ── Schema definition ──────────────────────────────────────────────────────────
 
+
 class SourceEntry(TypedDict):
     """A single retrieved passage with source attribution."""
-    text:   str   # the chunk text returned by the retriever
-    source: str   # originating document filename (e.g. "financial_policy.txt")
+
+    text: str  # the chunk text returned by the retriever
+    source: str  # originating document filename (e.g. "financial_policy.txt")
 
 
 class RAGResponse(TypedDict):
     """Canonical output contract for the Enterprise RAG pipeline."""
-    query:   str              # original user question
-    answer:  str              # LLM-generated, context-grounded answer
-    sources: List[SourceEntry]  # top-k retrieved passages with source metadata
-    model:   str              # Ollama generation model used
+
+    query: str  # original user question
+    answer: str  # LLM-generated, context-grounded answer
+    sources: list[SourceEntry]  # top-k retrieved passages with source metadata
+    model: str  # Ollama generation model used
 
 
 # ── Custom exception ───────────────────────────────────────────────────────────
+
 
 class ValidationError(ValueError):
     """Raised when a RAGResponse fails schema validation."""
@@ -46,7 +50,8 @@ class ValidationError(ValueError):
 
 # ── Validators ─────────────────────────────────────────────────────────────────
 
-def validate_json_string(raw: str) -> Dict[str, Any]:
+
+def validate_json_string(raw: str) -> dict[str, Any]:
     """
     Parses a JSON string and returns the decoded dict.
 
@@ -65,7 +70,7 @@ def validate_json_string(raw: str) -> Dict[str, Any]:
         raise ValidationError(f"Invalid JSON: {exc}") from exc
 
 
-def validate(response: Dict[str, Any]) -> RAGResponse:
+def validate(response: dict[str, Any]) -> RAGResponse:
     """
     Validates a dict against the RAGResponse schema.
 
@@ -96,9 +101,7 @@ def validate(response: Dict[str, Any]) -> RAGResponse:
     for key in ("query", "answer", "model"):
         if not isinstance(response[key], str) or not response[key].strip():
             log.error("Validation failed — field '%s' is empty or wrong type", key)
-            raise ValidationError(
-                f"RAGResponse field '{key}' must be a non-empty string."
-            )
+            raise ValidationError(f"RAGResponse field '{key}' must be a non-empty string.")
 
     if not isinstance(response["sources"], list) or not response["sources"]:
         log.error("Validation failed — 'sources' is empty or not a list")
@@ -107,20 +110,15 @@ def validate(response: Dict[str, Any]) -> RAGResponse:
     for i, entry in enumerate(response["sources"]):
         if not isinstance(entry, dict):
             log.error("Validation failed — sources[%d] is not a dict", i)
-            raise ValidationError(
-                f"RAGResponse sources[{i}] must be a dict, got {type(entry).__name__}."
-            )
+            raise ValidationError(f"RAGResponse sources[{i}] must be a dict, got {type(entry).__name__}.")
         for field in ("text", "source"):
             if not isinstance(entry.get(field), str) or not entry[field].strip():
-                log.error(
-                    "Validation failed — sources[%d]['%s'] missing or empty", i, field
-                )
-                raise ValidationError(
-                    f"RAGResponse sources[{i}]['{field}'] must be a non-empty string."
-                )
+                log.error("Validation failed — sources[%d]['%s'] missing or empty", i, field)
+                raise ValidationError(f"RAGResponse sources[{i}]['{field}'] must be a non-empty string.")
 
     log.info(
         "Validation succeeded — query='%.60s…' sources=%d",
-        response.get("query", ""), len(response["sources"]),
+        response.get("query", ""),
+        len(response["sources"]),
     )
     return RAGResponse(**response)  # type: ignore[return-value]

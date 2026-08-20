@@ -31,23 +31,22 @@ It expects pre-retrieved context — it does NOT perform retrieval or embedding.
 """
 
 import os
-from typing import List
 
-from rag._http          import OLLAMA_HOST, ollama_post
+from rag._http import OLLAMA_HOST, ollama_post
 from rag.logging_config import get_logger
 
 log = get_logger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-GENERATE_URL            = f"{OLLAMA_HOST}/api/generate"
-DEFAULT_OLLAMA_MODEL    = "mistral"
+GENERATE_URL = f"{OLLAMA_HOST}/api/generate"
+DEFAULT_OLLAMA_MODEL = "mistral"
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
-DEFAULT_GROQ_MODEL      = "openai/gpt-oss-20b"
-GEN_BACKEND             = os.environ.get("GEN_BACKEND", "ollama")
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
+GEN_BACKEND = os.environ.get("GEN_BACKEND", "ollama")
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def _build_prompt(query: str, passages: List[str]) -> str:
+def _build_prompt(query: str, passages: list[str]) -> str:
     """
     Constructs a RAG prompt with a system instruction, numbered passages,
     and the user's question.
@@ -61,8 +60,7 @@ def _build_prompt(query: str, passages: List[str]) -> str:
     """
     # Format each passage with a numbered label
     formatted_passages = "\n\n".join(
-        f"[Passage {i + 1}]\n{passage.strip()}"
-        for i, passage in enumerate(passages)
+        f"[Passage {i + 1}]\n{passage.strip()}" for i, passage in enumerate(passages)
     )
 
     return (
@@ -97,15 +95,12 @@ def _generate_anthropic(prompt: str, model: str) -> str:
         import anthropic
     except ImportError as exc:
         raise ImportError(
-            "backend='anthropic' requires the anthropic package.\n"
-            "  → pip install anthropic"
+            "backend='anthropic' requires the anthropic package.\n" "  → pip install anthropic"
         ) from exc
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        raise RuntimeError(
-            "backend='anthropic' requires the ANTHROPIC_API_KEY environment variable."
-        )
+        raise RuntimeError("backend='anthropic' requires the ANTHROPIC_API_KEY environment variable.")
 
     client = anthropic.Anthropic(api_key=api_key)
     try:
@@ -117,25 +112,18 @@ def _generate_anthropic(prompt: str, model: str) -> str:
     except anthropic.APIConnectionError as exc:
         raise ConnectionError(f"Anthropic API unreachable: {exc}") from exc
 
-    return "".join(
-        block.text for block in response.content if getattr(block, "type", None) == "text"
-    ).strip()
+    return "".join(block.text for block in response.content if getattr(block, "type", None) == "text").strip()
 
 
 def _generate_groq(prompt: str, model: str) -> str:
     try:
         import groq
     except ImportError as exc:
-        raise ImportError(
-            "backend='groq' requires the groq package.\n"
-            "  → pip install groq"
-        ) from exc
+        raise ImportError("backend='groq' requires the groq package.\n" "  → pip install groq") from exc
 
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        raise RuntimeError(
-            "backend='groq' requires the GROQ_API_KEY environment variable."
-        )
+        raise RuntimeError("backend='groq' requires the GROQ_API_KEY environment variable.")
 
     client = groq.Groq(api_key=api_key)
     try:
@@ -151,15 +139,15 @@ def _generate_groq(prompt: str, model: str) -> str:
 
 
 _BACKENDS = {
-    "ollama":    (_generate_ollama, DEFAULT_OLLAMA_MODEL),
+    "ollama": (_generate_ollama, DEFAULT_OLLAMA_MODEL),
     "anthropic": (_generate_anthropic, DEFAULT_ANTHROPIC_MODEL),
-    "groq":      (_generate_groq, DEFAULT_GROQ_MODEL),
+    "groq": (_generate_groq, DEFAULT_GROQ_MODEL),
 }
 
 
 def generate_answer(
     query: str,
-    passages: List[str],
+    passages: list[str],
     model: str = None,
     backend: str = None,
 ) -> str:

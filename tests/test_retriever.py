@@ -7,11 +7,13 @@ from rag.vector_store import NumpyVectorStore
 
 def test_retrieve_returns_top_k_sorted_descending():
     query = np.array([1.0, 0.0])
-    corpus = np.array([
-        [1.0, 0.0],   # identical -> score 1.0
-        [0.0, 1.0],   # orthogonal -> score 0.0
-        [0.9, 0.1],   # close -> high score
-    ])
+    corpus = np.array(
+        [
+            [1.0, 0.0],  # identical -> score 1.0
+            [0.0, 1.0],  # orthogonal -> score 0.0
+            [0.9, 0.1],  # close -> high score
+        ]
+    )
     chunks = ["exact", "unrelated", "close"]
     metadata = [{"source": "a.txt"}, {"source": "b.txt"}, {"source": "c.txt"}]
     store = NumpyVectorStore(corpus)

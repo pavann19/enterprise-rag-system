@@ -36,6 +36,7 @@ def client(monkeypatch):
 
 # ── /health ──────────────────────────────────────────────────────────────────
 
+
 def test_health_check_reports_ok_and_corpus_state(client):
     resp = client.get("/health")
     assert resp.status_code == 200
@@ -59,6 +60,7 @@ def test_health_check_does_not_invoke_query_pipeline(client, monkeypatch):
 
 # ── /query — request validation ─────────────────────────────────────────────
 
+
 def test_query_rejects_empty_string(client):
     resp = client.post("/query", json={"query": "   "})
     assert resp.status_code == 422
@@ -81,6 +83,7 @@ def test_query_rejects_non_json_body(client):
 
 # ── /query — success and error mapping ──────────────────────────────────────
 
+
 def test_query_success_returns_pipeline_response(client, monkeypatch):
     fake_response = {
         "query": "what is X?",
@@ -100,7 +103,12 @@ def test_query_passes_request_fields_through_to_pipeline(client, monkeypatch):
 
     def _capture(**kwargs):
         captured.update(kwargs)
-        return {"query": kwargs["query"], "answer": "a", "sources": [{"text": "t", "source": "s"}], "model": "m"}
+        return {
+            "query": kwargs["query"],
+            "answer": "a",
+            "sources": [{"text": "t", "source": "s"}],
+            "model": "m",
+        }
 
     monkeypatch.setattr(api_module, "query_pipeline", _capture)
     client.post("/query", json={"query": "does it thread through?"})
@@ -131,6 +139,7 @@ def test_query_returns_500_on_validation_error(client, monkeypatch):
 
 
 # ── Startup (lifespan) error handling ───────────────────────────────────────
+
 
 def test_startup_wraps_missing_data_dir_as_runtime_error(monkeypatch):
     def _raise(**kwargs):

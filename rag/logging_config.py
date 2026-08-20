@@ -20,12 +20,11 @@ To change the global log level at runtime:
 import logging
 import sys
 
-
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-_LOG_FORMAT  = "%(asctime)s [%(levelname)-8s] %(name)s — %(message)s"
+_LOG_FORMAT = "%(asctime)s [%(levelname)-8s] %(name)s — %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-_ROOT_NAME   = "rag"   # parent logger; all pipeline loggers are children
+_ROOT_NAME = "rag"  # parent logger; all pipeline loggers are children
 
 
 def configure_logging(level: int = logging.INFO) -> None:
@@ -47,7 +46,7 @@ def configure_logging(level: int = logging.INFO) -> None:
     handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_DATE_FORMAT))
     root.addHandler(handler)
     root.setLevel(level)
-    root.propagate = False   # don't bubble up to the Python root logger
+    root.propagate = False  # don't bubble up to the Python root logger
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -60,5 +59,5 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         A configured logging.Logger instance.
     """
-    configure_logging()   # idempotent — safe to call on every import
+    configure_logging()  # idempotent — safe to call on every import
     return logging.getLogger(name)

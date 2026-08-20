@@ -1,7 +1,7 @@
 import pytest
 
 import rag.generator as generator_module
-from rag.generator import generate_answer, _build_prompt
+from rag.generator import _build_prompt, generate_answer
 
 
 def test_build_prompt_includes_query_and_passages():

@@ -25,41 +25,37 @@ side.
 """
 
 import os
-from typing import List
 
 import numpy as np
 
-from rag._http import ollama_post, OLLAMA_HOST
+from rag._http import OLLAMA_HOST, ollama_post
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-EMBED_URL              = f"{OLLAMA_HOST}/api/embeddings"
-DEFAULT_OLLAMA_MODEL   = "nomic-embed-text"
-DEFAULT_LOCAL_MODEL    = "all-MiniLM-L6-v2"
-EMBED_BACKEND          = os.environ.get("EMBED_BACKEND", "ollama")
+EMBED_URL = f"{OLLAMA_HOST}/api/embeddings"
+DEFAULT_OLLAMA_MODEL = "nomic-embed-text"
+DEFAULT_LOCAL_MODEL = "all-MiniLM-L6-v2"
+EMBED_BACKEND = os.environ.get("EMBED_BACKEND", "ollama")
 # ──────────────────────────────────────────────────────────────────────────────
 
 _local_model_cache: dict = {}
 
 
-def _embed_texts_ollama(texts: List[str], model: str) -> np.ndarray:
-    vectors: List[List[float]] = []
+def _embed_texts_ollama(texts: list[str], model: str) -> np.ndarray:
+    vectors: list[list[float]] = []
     for text in texts:
         response = ollama_post(EMBED_URL, {"model": model, "prompt": text})
         if "embedding" not in response:
-            raise RuntimeError(
-                f"Ollama embedding response missing 'embedding' key.\nGot: {response}"
-            )
+            raise RuntimeError(f"Ollama embedding response missing 'embedding' key.\nGot: {response}")
         vectors.append(response["embedding"])
     return np.array(vectors, dtype=np.float32)
 
 
-def _embed_texts_local(texts: List[str], model: str) -> np.ndarray:
+def _embed_texts_local(texts: list[str], model: str) -> np.ndarray:
     try:
         from sentence_transformers import SentenceTransformer
     except ImportError as exc:
         raise ImportError(
-            "backend='local' requires sentence-transformers.\n"
-            "  → pip install sentence-transformers"
+            "backend='local' requires sentence-transformers.\n" "  → pip install sentence-transformers"
         ) from exc
 
     if model not in _local_model_cache:
@@ -70,12 +66,12 @@ def _embed_texts_local(texts: List[str], model: str) -> np.ndarray:
 
 _BACKENDS = {
     "ollama": (_embed_texts_ollama, DEFAULT_OLLAMA_MODEL),
-    "local":  (_embed_texts_local, DEFAULT_LOCAL_MODEL),
+    "local": (_embed_texts_local, DEFAULT_LOCAL_MODEL),
 }
 
 
 def embed_texts(
-    texts: List[str],
+    texts: list[str],
     model: str = None,
     backend: str = None,
 ) -> np.ndarray:

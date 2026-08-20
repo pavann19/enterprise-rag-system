@@ -326,35 +326,58 @@ Copy [`.env.example`](.env.example) to `.env` to set any of these locally — `.
 
 ## ✅ Testing
 
-165 tests across two layers:
+214 tests, 98% branch coverage (threshold-gated at 96% — see below), across three layers:
 
 - **Unit tests** for every pure-function module — chunking, vector search, retrieval,
   schema validation, prompt construction, HTTP config, backend dispatch — including
   boundary conditions (empty/whitespace input, dimension mismatches, tied scores,
-  unicode, zero-overlap, malformed schemas, missing dependencies/API keys), not just
-  the happy path.
-- **Integration tests** for both entry points — `service/api.py` via FastAPI's
+  unicode, zero-overlap, malformed schemas, missing dependencies/API keys) and, for
+  each cloud/local backend, both the dispatch logic *and* the real client-construction/
+  response-parsing body (mocked SDK, not bypassed) — not just the happy path.
+- **Integration tests** for every entry point — `service/api.py` via FastAPI's
   `TestClient` (routing, request validation, lifespan startup errors, HTTP status
-  mapping) and `streamlit_app.py` via Streamlit's `AppTest` harness (full script
-  execution, widget interaction, error rendering) — with ingestion and generation
-  stubbed out, so none of this requires a running Ollama instance.
+  mapping), `streamlit_app.py` via Streamlit's `AppTest` harness (full script
+  execution, widget interaction, error rendering, cloud-backend sidebar branches),
+  and `app.py`'s orchestration (`query_pipeline()`) with each stage mocked to verify
+  the wiring itself.
+- **CLI smoke tests** — `app.py`'s `__main__` block run as a real subprocess (argv
+  parsing, exit codes, stderr content), pinned to a guaranteed-unreachable
+  `OLLAMA_HOST` so it doesn't depend on ambient environment state.
+
+None of this requires a running Ollama instance.
 
 ```bash
 pip install -r requirements.txt
 python -m pytest tests/ -v
+
+# with coverage (same command CI runs):
+pytest tests/ --cov=app --cov=rag --cov=service --cov=validator --cov=eval --cov=streamlit_app --cov-report=term-missing
 ```
 
-Runs automatically on every push/PR via [GitHub Actions](.github/workflows/ci.yml)
-against Python 3.11 and 3.12.
+Runs automatically on every push/PR via [GitHub Actions](.github/workflows/ci.yml) —
+three parallel jobs: `lint` (`ruff` + `black --check`), `test` (Python 3.11 and 3.12,
+coverage threshold enforced via `pyproject.toml`'s `fail_under = 96`), and
+`docker-build` (image builds, compose config validates).
 
-This test pass also caught two real bugs, fixed alongside the tests that found them:
+This test pass caught three real bugs, fixed alongside the tests that found them:
 `validate()` raised an unhandled `AttributeError` instead of `ValidationError` on
-non-dict input, and `chunk_text(..., overlap=0)` always carried one word into the
-next chunk instead of zero, due to a loop that ran once before checking its own exit
-condition.
+non-dict input; `chunk_text(..., overlap=0)` always carried one word into the next
+chunk instead of zero, due to a loop that ran once before checking its own exit
+condition; and `app.py`'s CLI crashed with `UnicodeEncodeError` whenever stdout wasn't
+a real terminal (piped, redirected, captured by CI or a subprocess) because Windows
+defaults non-interactive output to `cp1252`, and the header prints use box-drawing
+Unicode characters — found by the CLI subprocess tests added for this pass, fixed by
+reconfiguring stdout/stderr to UTF-8 when not already.
 
 **Not yet covered:** live integration against a running Ollama instance (that's what
 `eval/run_eval.py` exercises for retrieval), and answer-quality evaluation. See Roadmap.
+
+**On test count specifically:** the target here was coverage of real behavior — every
+branch, every error path, every backend's actual body — not a round number. 214 tests
+at 98% branch coverage is what this codebase's actual surface area produces when
+nothing meaningful is left untested; padding toward an arbitrary count (1,000+) would
+mean either duplicate assertions or testing framework internals instead of this
+project's logic, which is a worse signal, not a better one.
 
 ---
 
@@ -503,7 +526,7 @@ The system is designed to be extended without modifying core pipeline logic:
 
 | Status | Priority | Item | Notes |
 |---|---|---|---|
-| ✅ Done | — | Unit + integration tests, CI | `tests/` (165 tests) + `.github/workflows/ci.yml`, see Testing |
+| ✅ Done | — | Unit + integration tests, coverage gate, lint gate, CI | `tests/` (214 tests, 98% coverage, 96% threshold) + `.github/workflows/ci.yml`, see Testing |
 | ✅ Done | High | Persist corpus embeddings | `rag/ingestion.py::ingest(cache_dir=...)` — fingerprinted on content + config, skips re-embedding on a cache hit |
 | ✅ Done | High | Pluggable vector store (NumPy / FAISS / Qdrant) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
 | ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR, hit-rate@k, precision@k against a 15-query golden set. Scoped-down alternative to RAGAS (no LLM judge, no cloud dependency); see `eval/README.md`. **Not yet run** — needs a live Ollama instance |

@@ -1,7 +1,6 @@
 import pytest
 
-from validator.json_validator import validate, validate_json_string, ValidationError
-
+from validator.json_validator import ValidationError, validate, validate_json_string
 
 VALID_RESPONSE = {
     "query": "What is the audit control policy?",

@@ -14,6 +14,7 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+import app
 import rag.ingestion as ingestion_module
 
 
@@ -108,7 +109,8 @@ def test_missing_data_directory_shows_error_and_stops():
 
 def test_ollama_unreachable_shows_friendly_error():
     with patch.object(
-        ingestion_module, "ingest",
+        ingestion_module,
+        "ingest",
         side_effect=ConnectionError("Ollama is not reachable at 'http://localhost:11434'"),
     ):
         at = AppTest.from_file("streamlit_app.py")
@@ -116,3 +118,123 @@ def test_ollama_unreachable_shows_friendly_error():
 
     assert not at.exception
     assert any("ollama is not reachable" in e.value.lower() for e in at.error)
+
+
+# ── Cloud-backend sidebar branches ──────────────────────────────────────────
+# streamlit_app.py's `from app import GEN_BACKEND` re-reads whatever is
+# currently on the already-imported `app` module each time AppTest re-execs
+# the script, so patching app.GEN_BACKEND/app.EMBED_BACKEND before .run()
+# is what lets these tests exercise the non-default sidebar branches.
+
+
+def test_sidebar_shows_anthropic_hint_when_gen_backend_is_anthropic():
+    with (
+        patch.object(app, "GEN_BACKEND", "anthropic"),
+        patch.object(ingestion_module, "ingest", side_effect=_fake_ingest),
+    ):
+        at = AppTest.from_file("streamlit_app.py")
+        at.run(timeout=30)
+
+    assert not at.exception
+    caption_text = " ".join(c.value for c in at.sidebar.caption)
+    assert "claude api" in caption_text.lower()
+    assert "anthropic_api_key" in caption_text.lower()
+
+
+def test_sidebar_shows_groq_hint_when_gen_backend_is_groq():
+    with (
+        patch.object(app, "GEN_BACKEND", "groq"),
+        patch.object(ingestion_module, "ingest", side_effect=_fake_ingest),
+    ):
+        at = AppTest.from_file("streamlit_app.py")
+        at.run(timeout=30)
+
+    assert not at.exception
+    caption_text = " ".join(c.value for c in at.sidebar.caption)
+    assert "groq api" in caption_text.lower()
+    assert "groq_api_key" in caption_text.lower()
+
+
+def test_sidebar_omits_ollama_hint_when_neither_backend_is_ollama():
+    with (
+        patch.object(app, "GEN_BACKEND", "groq"),
+        patch.object(app, "EMBED_BACKEND", "local"),
+        patch.object(ingestion_module, "ingest", side_effect=_fake_ingest),
+    ):
+        at = AppTest.from_file("streamlit_app.py")
+        at.run(timeout=30)
+
+    assert not at.exception
+    caption_text = " ".join(c.value for c in at.sidebar.caption)
+    assert "ollama serve" not in caption_text.lower()
+    assert not any("ollama serve" in code.value for code in at.sidebar.code)
+
+
+# ── Non-Ollama error branches ────────────────────────────────────────────────
+
+
+def test_corpus_load_connection_error_shown_generically_for_non_ollama_backend():
+    with (
+        patch.object(app, "EMBED_BACKEND", "local"),
+        patch.object(ingestion_module, "ingest", side_effect=ConnectionError("local model download failed")),
+    ):
+        at = AppTest.from_file("streamlit_app.py")
+        at.run(timeout=30)
+
+    assert not at.exception
+    assert any("embedding backend unreachable" in e.value.lower() for e in at.error)
+
+
+def test_ollama_generation_connection_error_shown_with_pull_hint(running_app):
+    with patch(
+        "app.query_pipeline",
+        side_effect=ConnectionError("Ollama is not reachable at 'http://localhost:11434'"),
+    ):
+        running_app.text_input[0].input("anything").run(timeout=30)
+        running_app.button[0].click().run(timeout=30)
+
+    assert not running_app.exception
+    assert any("ollama is not reachable" in e.value.lower() for e in running_app.error)
+    assert any("ollama pull" in e.value.lower() for e in running_app.error)
+
+
+def test_corpus_load_import_error_shown_for_missing_dependency():
+    with (
+        patch.object(app, "EMBED_BACKEND", "local"),
+        patch.object(ingestion_module, "ingest", side_effect=ImportError("sentence-transformers missing")),
+    ):
+        at = AppTest.from_file("streamlit_app.py")
+        at.run(timeout=30)
+
+    assert not at.exception
+    assert any("missing dependency" in e.value.lower() for e in at.error)
+
+
+def test_non_ollama_generation_connection_error_shown_generically(running_app):
+    with (
+        patch.object(app, "GEN_BACKEND", "groq"),
+        patch("app.query_pipeline", side_effect=ConnectionError("Groq API unreachable: timeout")),
+    ):
+        running_app.text_input[0].input("anything").run(timeout=30)
+        running_app.button[0].click().run(timeout=30)
+
+    assert not running_app.exception
+    assert any("generation backend unreachable" in e.value.lower() for e in running_app.error)
+
+
+def test_generation_import_error_shown_as_misconfiguration(running_app):
+    with patch("app.query_pipeline", side_effect=ImportError("backend='groq' requires the groq package")):
+        running_app.text_input[0].input("anything").run(timeout=30)
+        running_app.button[0].click().run(timeout=30)
+
+    assert not running_app.exception
+    assert any("misconfigured" in e.value.lower() for e in running_app.error)
+
+
+def test_generation_runtime_error_shown_as_misconfiguration(running_app):
+    with patch("app.query_pipeline", side_effect=RuntimeError("GROQ_API_KEY environment variable")):
+        running_app.text_input[0].input("anything").run(timeout=30)
+        running_app.button[0].click().run(timeout=30)
+
+    assert not running_app.exception
+    assert any("misconfigured" in e.value.lower() for e in running_app.error)

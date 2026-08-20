@@ -16,16 +16,17 @@ be unit-tested with synthetic data (see tests/test_eval_metrics.py) without
 a live pipeline.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Dict, List, Sequence
 
 
 @dataclass(frozen=True)
 class QueryResult:
     """One golden-set query's retrieval outcome, ready for scoring."""
+
     query_id: str
     expected_source: str
-    retrieved_sources: List[str]   # ranked, index 0 = top result
+    retrieved_sources: list[str]  # ranked, index 0 = top result
 
 
 def hit_at_k(result: QueryResult, k: int) -> bool:
@@ -55,25 +56,25 @@ def reciprocal_rank(result: QueryResult) -> float:
     return 0.0
 
 
-def mean_reciprocal_rank(results: List[QueryResult]) -> float:
+def mean_reciprocal_rank(results: list[QueryResult]) -> float:
     if not results:
         raise ValueError("results must not be empty.")
     return sum(reciprocal_rank(r) for r in results) / len(results)
 
 
-def hit_rate_at_k(results: List[QueryResult], k: int) -> float:
+def hit_rate_at_k(results: list[QueryResult], k: int) -> float:
     if not results:
         raise ValueError("results must not be empty.")
     return sum(1 for r in results if hit_at_k(r, k)) / len(results)
 
 
-def mean_precision_at_k(results: List[QueryResult], k: int) -> float:
+def mean_precision_at_k(results: list[QueryResult], k: int) -> float:
     if not results:
         raise ValueError("results must not be empty.")
     return sum(precision_at_k(r, k) for r in results) / len(results)
 
 
-def summarize(results: List[QueryResult], k_values: Sequence[int] = (1, 3, 5)) -> Dict[str, float]:
+def summarize(results: list[QueryResult], k_values: Sequence[int] = (1, 3, 5)) -> dict[str, float]:
     """
     Aggregates all metrics across a golden set into a single report dict.
 
@@ -86,11 +87,11 @@ def summarize(results: List[QueryResult], k_values: Sequence[int] = (1, 3, 5)) -
     """
     if not results:
         raise ValueError("results must not be empty.")
-    report: Dict[str, float] = {
+    report: dict[str, float] = {
         "n_queries": len(results),
         "mrr": mean_reciprocal_rank(results),
     }
     for k in k_values:
-        report[f"hit_rate@{k}"]  = hit_rate_at_k(results, k)
+        report[f"hit_rate@{k}"] = hit_rate_at_k(results, k)
         report[f"precision@{k}"] = mean_precision_at_k(results, k)
     return report

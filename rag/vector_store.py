@@ -26,9 +26,8 @@ that is the whole point of hiding the index behind this interface.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import List, Protocol, Tuple
+from typing import Protocol
 
 import numpy as np
 
@@ -40,7 +39,7 @@ log = get_logger(__name__)
 class VectorStore(Protocol):
     """Common interface every vector backend must implement."""
 
-    def search(self, query_embedding: np.ndarray, top_k: int) -> List[Tuple[int, float]]:
+    def search(self, query_embedding: np.ndarray, top_k: int) -> list[tuple[int, float]]:
         """Returns [(corpus_index, similarity_score), ...] sorted descending, length <= top_k."""
         ...
 
@@ -49,15 +48,15 @@ class VectorStore(Protocol):
         ...
 
     @classmethod
-    def load(cls, path: Path) -> "VectorStore":
+    def load(cls, path: Path) -> VectorStore:
         """Reconstructs the index previously written by save()."""
         ...
 
-    def __len__(self) -> int:
-        ...
+    def __len__(self) -> int: ...
 
 
 # ── NumPy backend ────────────────────────────────────────────────────────────
+
 
 class NumpyVectorStore:
     """Exact cosine-similarity search over an in-memory float32 array."""
@@ -69,7 +68,7 @@ class NumpyVectorStore:
             raise ValueError(f"embeddings must be 2-D, got shape {embeddings.shape}")
         self._embeddings = embeddings.astype(np.float32, copy=False)
 
-    def search(self, query_embedding: np.ndarray, top_k: int) -> List[Tuple[int, float]]:
+    def search(self, query_embedding: np.ndarray, top_k: int) -> list[tuple[int, float]]:
         if query_embedding.shape[-1] != self._embeddings.shape[-1]:
             raise ValueError(
                 f"Query embedding dimension {query_embedding.shape[-1]} does not match "
@@ -77,12 +76,10 @@ class NumpyVectorStore:
                 f"corpus was embedded with a different model/backend than the query — "
                 f"re-run ingestion with a matching embed_model/embed_backend."
             )
-        query_norm  = query_embedding / (np.linalg.norm(query_embedding) + 1e-10)
-        corpus_norm = self._embeddings / (
-            np.linalg.norm(self._embeddings, axis=1, keepdims=True) + 1e-10
-        )
-        scores  = corpus_norm @ query_norm
-        top_k   = min(top_k, len(self._embeddings))
+        query_norm = query_embedding / (np.linalg.norm(query_embedding) + 1e-10)
+        corpus_norm = self._embeddings / (np.linalg.norm(self._embeddings, axis=1, keepdims=True) + 1e-10)
+        scores = corpus_norm @ query_norm
+        top_k = min(top_k, len(self._embeddings))
         top_idx = np.argsort(scores)[::-1][:top_k]
         return [(int(i), float(scores[i])) for i in top_idx]
 
@@ -92,7 +89,7 @@ class NumpyVectorStore:
         log.info("NumpyVectorStore saved — %d vectors → %s", len(self), path)
 
     @classmethod
-    def load(cls, path: Path) -> "NumpyVectorStore":
+    def load(cls, path: Path) -> NumpyVectorStore:
         embeddings = np.load(path / cls._FILENAME)
         log.info("NumpyVectorStore loaded — %d vectors ← %s", len(embeddings), path)
         return cls(embeddings)
@@ -102,6 +99,7 @@ class NumpyVectorStore:
 
 
 # ── FAISS backend (optional) ─────────────────────────────────────────────────
+
 
 class FaissVectorStore:
     """Exact inner-product search over a FAISS IndexFlatIP.
@@ -127,9 +125,9 @@ class FaissVectorStore:
             raise ValueError(f"embeddings must be 2-D, got shape {embeddings.shape}")
 
         self._faiss = faiss
-        self._dim   = embeddings.shape[1]
+        self._dim = embeddings.shape[1]
         self._index = faiss.IndexFlatIP(self._dim)
-        self._n     = 0
+        self._n = 0
         self._add(embeddings)
 
     def _add(self, embeddings: np.ndarray) -> None:
@@ -143,7 +141,7 @@ class FaissVectorStore:
         norms = np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-10
         return embeddings / norms
 
-    def search(self, query_embedding: np.ndarray, top_k: int) -> List[Tuple[int, float]]:
+    def search(self, query_embedding: np.ndarray, top_k: int) -> list[tuple[int, float]]:
         if query_embedding.shape[-1] != self._dim:
             raise ValueError(
                 f"Query embedding dimension {query_embedding.shape[-1]} does not match "
@@ -155,9 +153,7 @@ class FaissVectorStore:
         top_k = min(top_k, self._n)
         scores, indices = self._index.search(query, top_k)
         return [
-            (int(idx), float(score))
-            for idx, score in zip(indices[0], scores[0])
-            if idx != -1
+            (int(idx), float(score)) for idx, score in zip(indices[0], scores[0], strict=True) if idx != -1
         ]
 
     def save(self, path: Path) -> None:
@@ -166,19 +162,17 @@ class FaissVectorStore:
         log.info("FaissVectorStore saved — %d vectors → %s", len(self), path)
 
     @classmethod
-    def load(cls, path: Path) -> "FaissVectorStore":
+    def load(cls, path: Path) -> FaissVectorStore:
         try:
             import faiss
         except ImportError as exc:
-            raise ImportError(
-                "faiss is not installed. Run: pip install faiss-cpu"
-            ) from exc
+            raise ImportError("faiss is not installed. Run: pip install faiss-cpu") from exc
 
         instance = object.__new__(cls)
         instance._faiss = faiss
         instance._index = faiss.read_index(str(path / cls._INDEX_FILENAME))
-        instance._dim   = instance._index.d
-        instance._n     = instance._index.ntotal
+        instance._dim = instance._index.d
+        instance._n = instance._index.ntotal
         log.info("FaissVectorStore loaded — %d vectors ← %s", instance._n, path)
         return instance
 
@@ -187,6 +181,7 @@ class FaissVectorStore:
 
 
 # ── Qdrant backend (optional) ────────────────────────────────────────────────
+
 
 class QdrantVectorStore:
     """Cosine search via qdrant-client's embedded/local mode.
@@ -206,7 +201,7 @@ class QdrantVectorStore:
     """
 
     _EMBEDDINGS_FILENAME = "qdrant_embeddings.npy"
-    _COLLECTION_NAME      = "corpus"
+    _COLLECTION_NAME = "corpus"
 
     def __init__(self, embeddings: np.ndarray):
         try:
@@ -222,7 +217,7 @@ class QdrantVectorStore:
             raise ValueError(f"embeddings must be 2-D, got shape {embeddings.shape}")
 
         self._embeddings = embeddings.astype(np.float32, copy=False)
-        self._dim        = self._embeddings.shape[1]
+        self._dim = self._embeddings.shape[1]
         self._client = QdrantClient(":memory:")
         self._client.create_collection(
             self._COLLECTION_NAME,
@@ -237,7 +232,7 @@ class QdrantVectorStore:
                 ],
             )
 
-    def search(self, query_embedding: np.ndarray, top_k: int) -> List[Tuple[int, float]]:
+    def search(self, query_embedding: np.ndarray, top_k: int) -> list[tuple[int, float]]:
         if query_embedding.shape[-1] != self._dim:
             raise ValueError(
                 f"Query embedding dimension {query_embedding.shape[-1]} does not match "
@@ -261,7 +256,7 @@ class QdrantVectorStore:
         log.info("QdrantVectorStore saved — %d vectors → %s", len(self), path)
 
     @classmethod
-    def load(cls, path: Path) -> "QdrantVectorStore":
+    def load(cls, path: Path) -> QdrantVectorStore:
         embeddings = np.load(path / cls._EMBEDDINGS_FILENAME)
         log.info("QdrantVectorStore loaded — %d vectors ← %s", len(embeddings), path)
         return cls(embeddings)
@@ -273,8 +268,8 @@ class QdrantVectorStore:
 # ── Factory ────────────────────────────────────────────────────────────────
 
 _BACKENDS = {
-    "numpy":  NumpyVectorStore,
-    "faiss":  FaissVectorStore,
+    "numpy": NumpyVectorStore,
+    "faiss": FaissVectorStore,
     "qdrant": QdrantVectorStore,
 }
 
@@ -292,18 +287,12 @@ def build_vector_store(embeddings: np.ndarray, backend: str = "numpy") -> Vector
         ImportError: If the selected backend's package is not installed.
     """
     if backend not in _BACKENDS:
-        raise ValueError(
-            f"Unknown vector store backend '{backend}'. "
-            f"Available: {sorted(_BACKENDS)}"
-        )
+        raise ValueError(f"Unknown vector store backend '{backend}'. " f"Available: {sorted(_BACKENDS)}")
     return _BACKENDS[backend](embeddings)
 
 
 def load_vector_store(path: Path, backend: str = "numpy") -> VectorStore:
     """Loads a previously-saved VectorStore of the given backend from `path`."""
     if backend not in _BACKENDS:
-        raise ValueError(
-            f"Unknown vector store backend '{backend}'. "
-            f"Available: {sorted(_BACKENDS)}"
-        )
+        raise ValueError(f"Unknown vector store backend '{backend}'. " f"Available: {sorted(_BACKENDS)}")
     return _BACKENDS[backend].load(path)

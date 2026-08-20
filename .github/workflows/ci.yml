@@ -7,6 +7,26 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install lint tools
+        run: pip install -r requirements.txt
+
+      - name: ruff
+        run: ruff check .
+
+      - name: black --check
+        run: black --check .
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -23,13 +43,31 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          # Lightweight optional backends installed so their real (non-mocked)
+          # code paths run in CI too, not just their ImportError branches.
+          # sentence-transformers/anthropic/groq are deliberately NOT installed
+          # here — every test that touches them mocks the SDK via sys.modules,
+          # by design, so real installs would add CI time without adding
+          # coverage. See tests/test_embedder_backends.py and
+          # tests/test_generator_backends.py's "_body" tests.
+          pip install faiss-cpu qdrant-client pypdf
 
       - name: Syntax check
         run: python -m py_compile app.py rag/*.py validator/*.py service/*.py streamlit_app.py eval/*.py
 
-      - name: Run tests
-        run: python -m pytest tests/ -v
+      - name: Run tests with coverage
+        run: >
+          python -m pytest tests/ -v
+          --cov=app --cov=rag --cov=service --cov=validator --cov=eval --cov=streamlit_app
+          --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.xml
 
   docker-build:
     runs-on: ubuntu-latest

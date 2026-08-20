@@ -147,7 +147,7 @@ def test_ingest_chunks_and_metadata_stay_aligned_across_files(corpus_dir, fake_e
     (corpus_dir / "c.txt").write_text("gamma document about grapes and guavas.", encoding="utf-8")
     chunks, metadata, store = ingest(corpus_dir)
 
-    for chunk, meta in zip(chunks, metadata):
+    for chunk, meta in zip(chunks, metadata, strict=True):
         # each source file's own vocabulary shouldn't leak into another file's chunk
         if meta["source"] == "a.txt":
             assert "apples" in chunk or "alpha" in chunk
@@ -197,16 +197,15 @@ def test_ingest_cache_roundtrip_with_qdrant_backend(corpus_dir, fake_embed, tmp_
 
 # ── PDF ingestion ─────────────────────────────────────────────────────────
 
+
 def test_ingest_picks_up_pdf_alongside_txt(corpus_dir, fake_embed):
-    (corpus_dir / "c.pdf").write_bytes(
-        make_minimal_pdf("gamma document about grapes and guavas")
-    )
+    (corpus_dir / "c.pdf").write_bytes(make_minimal_pdf("gamma document about grapes and guavas"))
 
     chunks, metadata, store = ingest(corpus_dir)
     sources = {m["source"] for m in metadata}
     assert sources == {"a.txt", "b.txt", "c.pdf"}
 
-    pdf_chunks = [c for c, m in zip(chunks, metadata) if m["source"] == "c.pdf"]
+    pdf_chunks = [c for c, m in zip(chunks, metadata, strict=True) if m["source"] == "c.pdf"]
     assert any("grapes" in c or "gamma" in c for c in pdf_chunks)
 
 

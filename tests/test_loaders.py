@@ -47,6 +47,7 @@ def test_load_document_text_rejects_unsupported_extension(tmp_path):
 
 def test_load_pdf_raises_clear_error_when_pypdf_missing(tmp_path, monkeypatch):
     import sys
+
     monkeypatch.setitem(sys.modules, "pypdf", None)
     filepath = tmp_path / "doc.pdf"
     filepath.write_bytes(make_minimal_pdf("won't get this far"))

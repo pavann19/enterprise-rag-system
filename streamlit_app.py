@@ -16,18 +16,18 @@ import streamlit as st
 # Make project root importable
 sys.path.insert(0, str(Path(__file__).parent))
 
-from rag.ingestion import ingest
 from app import (
-    query_pipeline,
-    DATA_DIR,
     CACHE_DIR,
-    EMBED_MODEL,
+    DATA_DIR,
     EMBED_BACKEND,
-    GEN_MODEL,
+    EMBED_MODEL,
     GEN_BACKEND,
+    GEN_MODEL,
     TOP_K,
     VECTOR_BACKEND,
+    query_pipeline,
 )
+from rag.ingestion import ingest
 from validator.json_validator import ValidationError
 
 # ── Page config ────────────────────────────────────────────────────────────────
@@ -44,8 +44,8 @@ with st.sidebar:
     st.header("⚙️ Configuration")
     st.caption(f"Embedding backend: `{EMBED_BACKEND}`  ·  Generation backend: `{GEN_BACKEND}`")
     embed_model = st.text_input("Embedding model", value=EMBED_MODEL)
-    gen_model   = st.text_input("Generation model", value=GEN_MODEL)
-    top_k       = st.slider("Top-k passages", min_value=1, max_value=10, value=TOP_K)
+    gen_model = st.text_input("Generation model", value=GEN_MODEL)
+    top_k = st.slider("Top-k passages", min_value=1, max_value=10, value=TOP_K)
     st.markdown("---")
     if EMBED_BACKEND == "ollama" or GEN_BACKEND == "ollama":
         st.code("ollama serve", language="bash")
@@ -57,16 +57,18 @@ with st.sidebar:
 
 # ── Corpus loading (cached so it only runs once) ───────────────────────────────
 
+
 @st.cache_resource(show_spinner="Loading and embedding document corpus…")
 def load_corpus(data_dir: str, embed_model_key: str, embed_backend_key: str):
     """Ingests all .txt files and returns (chunks, metadata, vector_store)."""
     return ingest(
-        data_dir      = Path(data_dir),
-        embed_model   = embed_model_key,
-        embed_backend = embed_backend_key,
-        backend       = VECTOR_BACKEND,
-        cache_dir     = CACHE_DIR,
+        data_dir=Path(data_dir),
+        embed_model=embed_model_key,
+        embed_backend=embed_backend_key,
+        backend=VECTOR_BACKEND,
+        cache_dir=CACHE_DIR,
     )
+
 
 # ── Main UI ────────────────────────────────────────────────────────────────────
 
@@ -115,15 +117,15 @@ if st.button("Ask", type="primary"):
         with st.spinner("Retrieving and generating…"):
             try:
                 response = query_pipeline(
-                    query         = query,
-                    chunks        = chunks,
-                    metadata      = metadata,
-                    vector_store  = vector_store,
-                    gen_model     = gen_model,
-                    gen_backend   = GEN_BACKEND,
-                    embed_model   = embed_model,
-                    embed_backend = EMBED_BACKEND,
-                    top_k         = top_k,
+                    query=query,
+                    chunks=chunks,
+                    metadata=metadata,
+                    vector_store=vector_store,
+                    gen_model=gen_model,
+                    gen_backend=GEN_BACKEND,
+                    embed_model=embed_model,
+                    embed_backend=EMBED_BACKEND,
+                    top_k=top_k,
                 )
             except ConnectionError as exc:
                 if GEN_BACKEND == "ollama":

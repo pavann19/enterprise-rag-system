@@ -24,23 +24,22 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List
 
-from rag.ingestion import ingest
-from rag.embedder  import embed_texts
-from rag.retriever import retrieve
+from rag.embedder import embed_texts
 from rag.generator import generate_answer
+from rag.ingestion import ingest
+from rag.retriever import retrieve
 from rag.vector_store import VectorStore
-from validator.json_validator import validate, ValidationError, RAGResponse
+from validator.json_validator import RAGResponse, ValidationError, validate
 
 # ── Configuration ───────────────────────────────────────────────────────────────
 
-DATA_DIR       = Path(__file__).parent / "data"
-CACHE_DIR      = Path(__file__).parent / ".cache" / "corpus"
-CHUNK_SIZE     = 300
-CHUNK_OVERLAP  = 50
-TOP_K          = 3
-VECTOR_BACKEND = os.environ.get("VECTOR_BACKEND") or "numpy"   # or "faiss"/"qdrant" — see rag/vector_store.py
+DATA_DIR = Path(__file__).parent / "data"
+CACHE_DIR = Path(__file__).parent / ".cache" / "corpus"
+CHUNK_SIZE = 300
+CHUNK_OVERLAP = 50
+TOP_K = 3
+VECTOR_BACKEND = os.environ.get("VECTOR_BACKEND") or "numpy"  # or "faiss"/"qdrant" — see rag/vector_store.py
 
 # Embedding: "ollama" (default, local, needs OLLAMA_HOST reachable) or
 # "local" (sentence-transformers, in-process, no server — hosted demos).
@@ -55,9 +54,9 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL") or _EMBED_MODEL_DEFAULTS.get(EMBED_B
 # why these exist).
 GEN_BACKEND = os.environ.get("GEN_BACKEND") or "ollama"
 _GEN_MODEL_DEFAULTS = {
-    "ollama":    "mistral",
+    "ollama": "mistral",
     "anthropic": "claude-haiku-4-5-20251001",
-    "groq":      "openai/gpt-oss-20b",
+    "groq": "openai/gpt-oss-20b",
 }
 GEN_MODEL = os.environ.get("GEN_MODEL") or _GEN_MODEL_DEFAULTS.get(GEN_BACKEND, "mistral")
 
@@ -76,16 +75,17 @@ GEN_MODEL = os.environ.get("GEN_MODEL") or _GEN_MODEL_DEFAULTS.get(GEN_BACKEND, 
 
 # ── Phase 2: Query pipeline ─────────────────────────────────────────────────────
 
+
 def query_pipeline(
     query: str,
-    chunks: List[str],
-    metadata: List[Dict[str, str]],
+    chunks: list[str],
+    metadata: list[dict[str, str]],
     vector_store: VectorStore,
-    gen_model: str     = GEN_MODEL,
-    gen_backend: str   = GEN_BACKEND,
-    embed_model: str   = EMBED_MODEL,
+    gen_model: str = GEN_MODEL,
+    gen_backend: str = GEN_BACKEND,
+    embed_model: str = EMBED_MODEL,
     embed_backend: str = EMBED_BACKEND,
-    top_k: int         = TOP_K,
+    top_k: int = TOP_K,
 ) -> RAGResponse:
     """
     Encodes the query, retrieves top-k passages with source metadata,
@@ -114,11 +114,11 @@ def query_pipeline(
 
     # 2. Retrieve top-k passages with source metadata
     results = retrieve(
-        query_embedding = query_embedding,
-        vector_store    = vector_store,
-        chunks          = chunks,
-        metadata        = metadata,
-        top_k           = top_k,
+        query_embedding=query_embedding,
+        vector_store=vector_store,
+        chunks=chunks,
+        metadata=metadata,
+        top_k=top_k,
     )
     # results: [{"text": str, "score": float, "source": str}, ...]
 
@@ -129,33 +129,41 @@ def query_pipeline(
 
     # 4. Build and validate structured response
     raw_response = {
-        "query":   query,
-        "answer":  answer,
+        "query": query,
+        "answer": answer,
         "sources": [{"text": r["text"], "source": r["source"]} for r in results],
-        "model":   gen_model,
+        "model": gen_model,
     }
     return validate(raw_response)
 
 
 # ── Entry point ─────────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    query = (
-        sys.argv[1]
-        if len(sys.argv) > 1
-        else "What is the policy for budget variances exceeding 10%?"
-    )
+if __name__ == "__main__":  # pragma: no cover — exercised via subprocess in
+    # tests/test_app_cli.py, invisible to coverage.py
+    # in the parent pytest process
+    # Without this, redirecting/capturing stdout on Windows (a log file, a
+    # CI runner, subprocess.PIPE) defaults to the console codepage (cp1252)
+    # instead of UTF-8, and the box-drawing characters in the prints below
+    # crash with UnicodeEncodeError. A real terminal already negotiates
+    # UTF-8 correctly, so this only matters for the non-interactive case —
+    # which is exactly the case that matters for a CLI meant to be scripted.
+    if sys.stdout.encoding is not None and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+
+    query = sys.argv[1] if len(sys.argv) > 1 else "What is the policy for budget variances exceeding 10%?"
 
     print("\n── INGESTION ──────────────────────────────")
     try:
         chunks, metadata, vector_store = ingest(
-            data_dir      = DATA_DIR,
-            chunk_size    = CHUNK_SIZE,
-            chunk_overlap = CHUNK_OVERLAP,
-            embed_model   = EMBED_MODEL,
-            embed_backend = EMBED_BACKEND,
-            backend       = VECTOR_BACKEND,
-            cache_dir     = CACHE_DIR,
+            data_dir=DATA_DIR,
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
+            embed_model=EMBED_MODEL,
+            embed_backend=EMBED_BACKEND,
+            backend=VECTOR_BACKEND,
+            cache_dir=CACHE_DIR,
         )
     except (FileNotFoundError, ConnectionError) as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
@@ -166,10 +174,10 @@ if __name__ == "__main__":
 
     try:
         response = query_pipeline(
-            query        = query,
-            chunks       = chunks,
-            metadata     = metadata,
-            vector_store = vector_store,
+            query=query,
+            chunks=chunks,
+            metadata=metadata,
+            vector_store=vector_store,
         )
     except ConnectionError as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)

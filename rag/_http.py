@@ -18,18 +18,18 @@ the same private network.
 
 import json
 import os
-import urllib.request
 import urllib.error
-from typing import Any, Dict
+import urllib.request
+from typing import Any
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 
 
 def ollama_post(
     url: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     timeout: int = 60,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Sends a JSON POST request to an Ollama endpoint and returns the response.
 

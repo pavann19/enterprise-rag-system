@@ -15,8 +15,6 @@ Each result carries source-level metadata (filename), enabling cross-document
 attribution and auditability in the final structured response.
 """
 
-from typing import Dict, List
-
 import numpy as np
 
 from rag.logging_config import get_logger
@@ -28,10 +26,10 @@ log = get_logger(__name__)
 def retrieve(
     query_embedding: np.ndarray,
     vector_store: VectorStore,
-    chunks: List[str],
-    metadata: List[Dict[str, str]],
+    chunks: list[str],
+    metadata: list[dict[str, str]],
     top_k: int = 3,
-) -> List[Dict[str, object]]:
+) -> list[dict[str, object]]:
     """
     Returns the top-k chunks most semantically similar to the query,
     each annotated with its source document filename and similarity score.
@@ -56,21 +54,17 @@ def retrieve(
         raise ValueError("chunks must not be empty.")
     if len(chunks) != len(vector_store):
         raise ValueError(
-            f"Length mismatch: {len(chunks)} chunks vs "
-            f"{len(vector_store)} vectors in the store."
+            f"Length mismatch: {len(chunks)} chunks vs " f"{len(vector_store)} vectors in the store."
         )
     if len(chunks) != len(metadata):
-        raise ValueError(
-            f"Length mismatch: {len(chunks)} chunks vs "
-            f"{len(metadata)} metadata entries."
-        )
+        raise ValueError(f"Length mismatch: {len(chunks)} chunks vs " f"{len(metadata)} metadata entries.")
 
     hits = vector_store.search(query_embedding, top_k)
 
     results = [
         {
-            "text":   chunks[i],
-            "score":  round(score, 4),
+            "text": chunks[i],
+            "score": round(score, 4),
             "source": metadata[i].get("source", "unknown"),
         }
         for i, score in hits

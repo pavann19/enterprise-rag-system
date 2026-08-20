@@ -58,7 +58,7 @@ def test_zero_overlap_produces_non_repeating_chunks():
     chunks = chunk_text(text, chunk_size=50, overlap=0)
     assert len(chunks) > 1
     # with zero overlap, no word should appear in two consecutive chunks
-    for a, b in zip(chunks, chunks[1:]):
+    for a, b in zip(chunks, chunks[1:], strict=False):  # deliberately offset by one
         assert set(a.split()).isdisjoint(set(b.split()))
 
 
@@ -94,4 +94,17 @@ def test_chunking_is_deterministic():
 def test_no_chunk_is_only_whitespace():
     text = " ".join(f"word{i}" for i in range(150))
     chunks = chunk_text(text, chunk_size=40, overlap=5)
+    assert all(chunk.strip() for chunk in chunks)
+
+
+def test_text_ending_exactly_on_a_chunk_boundary_has_no_trailing_empty_chunk():
+    # When the last word processed pushes current_len over chunk_size AND
+    # overlap=0 (so nothing carries into a new current_chunk) AND that was
+    # the final word, current_chunk is empty with no more words left to
+    # append — the trailing `if current_chunk:` guard must skip it rather
+    # than emit an empty final chunk.
+    words = [f"w{i}" for i in range(20)]
+    text = " ".join(words)
+    chunks = chunk_text(text, chunk_size=len(text), overlap=0)
+    assert chunks == [text]
     assert all(chunk.strip() for chunk in chunks)

@@ -26,7 +26,7 @@ rather than silently reporting zero scores.
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app import (
@@ -47,7 +47,7 @@ from rag.retriever import retrieve
 log = get_logger(__name__)
 
 GOLDEN_SET_PATH = Path(__file__).parent / "golden_set.json"
-RESULTS_DIR     = Path(__file__).parent / "results"
+RESULTS_DIR = Path(__file__).parent / "results"
 
 
 def load_golden_set(path: Path = GOLDEN_SET_PATH) -> list:
@@ -68,13 +68,13 @@ def run(
     log.info("Loaded %d golden queries", len(golden_queries))
 
     chunks, metadata, vector_store = ingest(
-        data_dir      = DATA_DIR,
-        chunk_size    = CHUNK_SIZE,
-        chunk_overlap = CHUNK_OVERLAP,
-        embed_model   = EMBED_MODEL,
-        embed_backend = EMBED_BACKEND,
-        backend       = backend,
-        cache_dir     = CACHE_DIR,
+        data_dir=DATA_DIR,
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        embed_model=EMBED_MODEL,
+        embed_backend=EMBED_BACKEND,
+        backend=backend,
+        cache_dir=CACHE_DIR,
     )
 
     per_query = []
@@ -83,44 +83,50 @@ def run(
     for item in golden_queries:
         query_embedding = embed_texts([item["query"]], model=EMBED_MODEL, backend=EMBED_BACKEND)[0]
         hits = retrieve(
-            query_embedding = query_embedding,
-            vector_store    = vector_store,
-            chunks          = chunks,
-            metadata        = metadata,
-            top_k           = top_k_retrieved,
+            query_embedding=query_embedding,
+            vector_store=vector_store,
+            chunks=chunks,
+            metadata=metadata,
+            top_k=top_k_retrieved,
         )
         retrieved_sources = [h["source"] for h in hits]
 
         result = QueryResult(
-            query_id          = item["id"],
-            expected_source   = item["expected_source"],
-            retrieved_sources = retrieved_sources,
+            query_id=item["id"],
+            expected_source=item["expected_source"],
+            retrieved_sources=retrieved_sources,
         )
         query_results.append(result)
-        per_query.append({
-            "id": item["id"],
-            "query": item["query"],
-            "expected_source": item["expected_source"],
-            "retrieved_sources": retrieved_sources,
-            "reciprocal_rank": round(
-                next(
-                    (1.0 / (i + 1) for i, s in enumerate(retrieved_sources)
-                     if s == item["expected_source"]),
-                    0.0,
-                ), 4,
-            ),
-        })
+        per_query.append(
+            {
+                "id": item["id"],
+                "query": item["query"],
+                "expected_source": item["expected_source"],
+                "retrieved_sources": retrieved_sources,
+                "reciprocal_rank": round(
+                    next(
+                        (
+                            1.0 / (i + 1)
+                            for i, s in enumerate(retrieved_sources)
+                            if s == item["expected_source"]
+                        ),
+                        0.0,
+                    ),
+                    4,
+                ),
+            }
+        )
 
     summary = summarize(query_results, k_values=k_values)
 
     return {
         "config": {
-            "data_dir":      str(DATA_DIR),
+            "data_dir": str(DATA_DIR),
             "embed_backend": EMBED_BACKEND,
-            "embed_model":   EMBED_MODEL,
-            "chunk_size":   CHUNK_SIZE,
+            "embed_model": EMBED_MODEL,
+            "chunk_size": CHUNK_SIZE,
             "chunk_overlap": CHUNK_OVERLAP,
-            "backend":      backend,
+            "backend": backend,
             "top_k_retrieved": top_k_retrieved,
         },
         "summary": summary,
@@ -130,10 +136,12 @@ def run(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Retrieval evaluation harness")
-    parser.add_argument("--k", type=int, nargs="+", default=[1, 3, 5],
-                         help="top-k cutoffs to report hit-rate/precision at")
-    parser.add_argument("--top-k-retrieved", type=int, default=5,
-                         help="how many passages retrieve() returns per query")
+    parser.add_argument(
+        "--k", type=int, nargs="+", default=[1, 3, 5], help="top-k cutoffs to report hit-rate/precision at"
+    )
+    parser.add_argument(
+        "--top-k-retrieved", type=int, default=5, help="how many passages retrieve() returns per query"
+    )
     parser.add_argument("--backend", default=VECTOR_BACKEND, choices=["numpy", "faiss", "qdrant"])
     args = parser.parse_args()
 
@@ -146,11 +154,11 @@ def main() -> None:
     print(json.dumps(report["summary"], indent=2))
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out_path = RESULTS_DIR / f"eval_{timestamp}.json"
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\nFull report written to {out_path}")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover — trivial guard; main() itself is tested directly
     main()

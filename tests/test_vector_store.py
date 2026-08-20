@@ -9,18 +9,21 @@ from rag.vector_store import (
 
 try:
     import faiss  # noqa: F401
+
     FAISS_AVAILABLE = True
 except ImportError:
     FAISS_AVAILABLE = False
 
 try:
     import qdrant_client  # noqa: F401
+
     QDRANT_AVAILABLE = True
 except ImportError:
     QDRANT_AVAILABLE = False
 
 
 # ── NumpyVectorStore ─────────────────────────────────────────────────────────
+
 
 def test_numpy_store_identical_vector_scores_one():
     store = NumpyVectorStore(np.array([[1.0, 2.0, 3.0]]))
@@ -111,6 +114,7 @@ def test_numpy_store_save_load_roundtrip(tmp_path):
 
 # ── Factory ────────────────────────────────────────────────────────────────
 
+
 def test_build_vector_store_numpy_default():
     store = build_vector_store(np.array([[1.0, 0.0]]))
     assert isinstance(store, NumpyVectorStore)
@@ -128,6 +132,7 @@ def test_load_vector_store_rejects_unknown_backend(tmp_path):
 
 # ── FAISS backend (skipped if faiss is not installed) ───────────────────────
 
+
 @pytest.mark.skipif(not FAISS_AVAILABLE, reason="faiss-cpu not installed")
 class TestFaissVectorStore:
     def test_ranking_matches_numpy_backend(self):
@@ -143,7 +148,7 @@ class TestFaissVectorStore:
         numpy_order = [idx for idx, _ in numpy_hits]
         faiss_order = [idx for idx, _ in faiss_hits]
         assert numpy_order == faiss_order
-        for (_, n_score), (_, f_score) in zip(numpy_hits, faiss_hits):
+        for (_, n_score), (_, f_score) in zip(numpy_hits, faiss_hits, strict=True):
             assert n_score == pytest.approx(f_score, abs=1e-4)
 
     def test_save_load_roundtrip(self, tmp_path):
@@ -181,6 +186,7 @@ def test_faiss_backend_raises_clear_error_when_not_installed(monkeypatch):
 
 # ── Qdrant backend (skipped if qdrant-client is not installed) ──────────────
 
+
 @pytest.mark.skipif(not QDRANT_AVAILABLE, reason="qdrant-client not installed")
 class TestQdrantVectorStore:
     def test_ranking_matches_numpy_backend(self):
@@ -196,7 +202,7 @@ class TestQdrantVectorStore:
         numpy_order = [idx for idx, _ in numpy_hits]
         qdrant_order = [idx for idx, _ in qdrant_hits]
         assert numpy_order == qdrant_order
-        for (_, n_score), (_, q_score) in zip(numpy_hits, qdrant_hits):
+        for (_, n_score), (_, q_score) in zip(numpy_hits, qdrant_hits, strict=True):
             assert n_score == pytest.approx(q_score, abs=1e-4)
 
     def test_save_load_roundtrip(self, tmp_path):
