@@ -8,6 +8,7 @@ rag.ingestion.ingest and app.query_pipeline are monkeypatched before each
 run so these tests need no live Ollama instance.
 """
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +17,13 @@ from streamlit.testing.v1 import AppTest
 
 import app
 import rag.ingestion as ingestion_module
+
+# AppTest.from_file() resolves a *relative* path against the file that calls
+# it (tests/) in some streamlit versions and against the process CWD in
+# others — that inconsistency passed locally (streamlit 1.49.1, CWD ==
+# repo root by coincidence) and failed on CI's newer streamlit install with
+# a FileNotFoundError. An absolute path sidesteps the ambiguity entirely.
+STREAMLIT_APP_PATH = str(Path(__file__).parent.parent / "streamlit_app.py")
 
 
 @pytest.fixture(autouse=True)
@@ -46,7 +54,7 @@ def _fake_ingest(*args, **kwargs):
 def running_app():
     """Runs streamlit_app.py with ingestion mocked out, corpus loaded successfully."""
     with patch.object(ingestion_module, "ingest", side_effect=_fake_ingest):
-        at = AppTest.from_file("streamlit_app.py")
+        at = AppTest.from_file(STREAMLIT_APP_PATH)
         at.run(timeout=30)
         yield at
 
@@ -100,7 +108,7 @@ def test_asking_a_question_shows_validation_error(running_app):
 
 def test_missing_data_directory_shows_error_and_stops():
     with patch.object(ingestion_module, "ingest", side_effect=FileNotFoundError("no docs found")):
-        at = AppTest.from_file("streamlit_app.py")
+        at = AppTest.from_file(STREAMLIT_APP_PATH)
         at.run(timeout=30)
 
     assert not at.exception
@@ -113,7 +121,7 @@ def test_ollama_unreachable_shows_friendly_error():
         "ingest",
         side_effect=ConnectionError("Ollama is not reachable at 'http://localhost:11434'"),
     ):
-        at = AppTest.from_file("streamlit_app.py")
+        at = AppTest.from_file(STREAMLIT_APP_PATH)
         at.run(timeout=30)
 
     assert not at.exception
@@ -132,7 +140,7 @@ def test_sidebar_shows_anthropic_hint_when_gen_backend_is_anthropic():
         patch.object(app, "GEN_BACKEND", "anthropic"),
         patch.object(ingestion_module, "ingest", side_effect=_fake_ingest),
     ):
-        at = AppTest.from_file("streamlit_app.py")
+        at = AppTest.from_file(STREAMLIT_APP_PATH)
         at.run(timeout=30)
 
     assert not at.exception
@@ -146,7 +154,7 @@ def test_sidebar_shows_groq_hint_when_gen_backend_is_groq():
         patch.object(app, "GEN_BACKEND", "groq"),
         patch.object(ingestion_module, "ingest", side_effect=_fake_ingest),
     ):
-        at = AppTest.from_file("streamlit_app.py")
+        at = AppTest.from_file(STREAMLIT_APP_PATH)
         at.run(timeout=30)
 
     assert not at.exception
@@ -161,7 +169,7 @@ def test_sidebar_omits_ollama_hint_when_neither_backend_is_ollama():
         patch.object(app, "EMBED_BACKEND", "local"),
         patch.object(ingestion_module, "ingest", side_effect=_fake_ingest),
     ):
-        at = AppTest.from_file("streamlit_app.py")
+        at = AppTest.from_file(STREAMLIT_APP_PATH)
         at.run(timeout=30)
 
     assert not at.exception
@@ -178,7 +186,7 @@ def test_corpus_load_connection_error_shown_generically_for_non_ollama_backend()
         patch.object(app, "EMBED_BACKEND", "local"),
         patch.object(ingestion_module, "ingest", side_effect=ConnectionError("local model download failed")),
     ):
-        at = AppTest.from_file("streamlit_app.py")
+        at = AppTest.from_file(STREAMLIT_APP_PATH)
         at.run(timeout=30)
 
     assert not at.exception
@@ -203,7 +211,7 @@ def test_corpus_load_import_error_shown_for_missing_dependency():
         patch.object(app, "EMBED_BACKEND", "local"),
         patch.object(ingestion_module, "ingest", side_effect=ImportError("sentence-transformers missing")),
     ):
-        at = AppTest.from_file("streamlit_app.py")
+        at = AppTest.from_file(STREAMLIT_APP_PATH)
         at.run(timeout=30)
 
     assert not at.exception

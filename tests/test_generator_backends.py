@@ -53,6 +53,11 @@ def test_anthropic_backend_raises_clear_error_when_package_missing(monkeypatch):
 
 
 def test_anthropic_backend_raises_clear_error_when_api_key_missing(monkeypatch):
+    # A fake module stands in for the real `anthropic` package so this test
+    # is deterministic whether or not it's actually installed (it isn't in
+    # CI, by design — see the module docstring) — the point here is the
+    # api-key check, which runs after the import succeeds either way.
+    monkeypatch.setitem(sys.modules, "anthropic", MagicMock())
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
         generate_answer("q", ["ctx"], backend="anthropic")
@@ -82,6 +87,7 @@ def test_groq_backend_raises_clear_error_when_package_missing(monkeypatch):
 
 
 def test_groq_backend_raises_clear_error_when_api_key_missing(monkeypatch):
+    monkeypatch.setitem(sys.modules, "groq", MagicMock())
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
         generate_answer("q", ["ctx"], backend="groq")
