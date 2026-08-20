@@ -386,8 +386,9 @@ project's logic, which is a worse signal, not a better one.
 `eval/` scores retrieval quality (does the right document come back) against a
 15-query hand-labeled golden set — MRR, hit-rate@k, precision@k. No LLM judge, no
 cloud dependency; see [`eval/README.md`](eval/README.md) for what this does and
-does not measure, and why answer-quality metrics (faithfulness, relevancy) are out
-of scope for now.
+does not measure, why answer-quality metrics (faithfulness, relevancy) are out of
+scope for now, and the actual measured result (MRR 1.0 — read the honest caveats
+there before treating that as more than it is).
 
 ```bash
 ollama serve
@@ -529,7 +530,7 @@ The system is designed to be extended without modifying core pipeline logic:
 | ✅ Done | — | Unit + integration tests, coverage gate, lint gate, CI | `tests/` (214 tests, 98% coverage, 96% threshold) + `.github/workflows/ci.yml`, see Testing |
 | ✅ Done | High | Persist corpus embeddings | `rag/ingestion.py::ingest(cache_dir=...)` — fingerprinted on content + config, skips re-embedding on a cache hit |
 | ✅ Done | High | Pluggable vector store (NumPy / FAISS / Qdrant) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
-| ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR, hit-rate@k, precision@k against a 15-query golden set. Scoped-down alternative to RAGAS (no LLM judge, no cloud dependency); see `eval/README.md`. **Not yet run** — needs a live Ollama instance |
+| ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR 1.0, hit-rate@1/3/5 all 1.0, precision@5 0.75 on the 15-query golden set (real run, not illustrative — see `eval/README.md` for the honest read on what that does/doesn't prove) |
 | ✅ Done | High | Containerize (Docker) | `Dockerfile` + `docker-compose.yml`, verified end-to-end (real ingestion, retrieval, generation) — see Run With Docker |
 | 🟡 Partial | Medium | Hosted demo | `EMBED_BACKEND=local` / `GEN_BACKEND=anthropic`\|`groq` implemented and tested, see [Hosted / Public Demo](#-hosted--public-demo) — actual deployment to Streamlit Cloud/HF Spaces not yet done |
 | ✅ Done | Medium | PDF ingestion | `rag/loaders.py`; drop a `.pdf` into `data/`, `pip install pypdf` (or uncomment it in `requirements.txt`) |

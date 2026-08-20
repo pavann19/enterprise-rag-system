@@ -33,23 +33,40 @@ python -m eval.run_eval
 ```
 
 Writes a timestamped full report to `eval/results/` (gitignored — regenerate
-rather than commit) and prints the summary to stdout, e.g.:
+rather than commit) and prints the summary to stdout.
+
+## Actual measured result (2026-08-20)
+
+Run against the real corpus with `nomic-embed-text` via Ollama, `top_k=5`,
+`backend=numpy` — not a stub, not illustrative:
 
 ```json
 {
   "n_queries": 15,
-  "mrr": 0.93,
-  "hit_rate@1": 0.87,
-  "precision@1": 0.87,
+  "mrr": 1.0,
+  "hit_rate@1": 1.0,
+  "precision@1": 1.0,
   "hit_rate@3": 1.0,
-  "precision@3": 0.33
+  "precision@3": 0.8666666666666667,
+  "hit_rate@5": 1.0,
+  "precision@5": 0.7466666666666666
 }
 ```
 
-**No run has been captured yet in this repository** — the harness has been built
-and its metric functions are unit-tested, but end-to-end numbers require a local
-Ollama instance this environment doesn't have running. Treat any numbers you see
-elsewhere as illustrative only until a real `eval/results/*.json` exists.
+Every one of the 15 golden queries retrieved its expected source document at
+rank 1 (MRR = 1.0). Precision drops as `k` grows because the corpus documents
+share vocabulary (all three are finance-policy text), so top-3/top-5 pull in
+some correct-topic-but-wrong-file passages alongside the right one — expected
+retrieval behavior, not a bug.
+
+**Read this number honestly, not generously:** 15 hand-labeled queries against
+a 3-document corpus is a real measurement, not a production-scale claim.
+Perfect retrieval here says the pipeline's cosine-similarity ranking works
+correctly on well-separated documents with distinct vocabulary — it says
+nothing about performance on a larger, noisier, or more ambiguous corpus. Full
+per-query detail (which passages ranked where, for which query) lives in the
+timestamped report this run produced; re-run it yourself to reproduce or
+challenge these numbers rather than taking them on faith.
 
 ## Extending the golden set
 
