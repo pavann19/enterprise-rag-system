@@ -42,6 +42,24 @@ def configure_logging(level: int = logging.INFO) -> None:
     if root.handlers:
         return
 
+    # On Windows, a non-interactive stdout (piped, redirected, or captured
+    # by a CI runner) defaults to the console codepage (cp1252) instead of
+    # UTF-8. This project's log messages use em-dashes and arrows, which
+    # then crash the handler with UnicodeEncodeError — not a caught
+    # exception, since the logging module swallows handler errors and just
+    # prints "--- Logging error ---", so this was silently corrupting
+    # output rather than failing loudly. A real terminal already
+    # negotiates UTF-8 correctly, so this only matters for the
+    # non-interactive case. Same fix as app.py's __main__ block, but
+    # centralized here so every entry point that logs gets it, not just
+    # the CLI.
+    if (
+        hasattr(sys.stdout, "reconfigure")
+        and sys.stdout.encoding is not None
+        and sys.stdout.encoding.lower() != "utf-8"
+    ):
+        sys.stdout.reconfigure(encoding="utf-8")
+
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_DATE_FORMAT))
     root.addHandler(handler)

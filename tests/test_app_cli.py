@@ -34,6 +34,14 @@ def _run_app(args, extra_env=None, timeout=30):
         env=env,
         capture_output=True,
         text=True,
+        # app.py reconfigures its own stdout/stderr to UTF-8 (see its
+        # __main__ block) precisely so its em-dash/arrow log output
+        # doesn't crash on Windows — but subprocess.run(text=True) decodes
+        # the captured bytes using *this* process's preferred encoding by
+        # default, which is the Windows console codepage (cp1252), not
+        # UTF-8. Without pinning it here, the child now succeeds while the
+        # test harness capturing it fails instead.
+        encoding="utf-8",
         timeout=timeout,
     )
 
