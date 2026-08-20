@@ -14,7 +14,7 @@ The pipeline is exposed via a FastAPI service layer, enabling integration with m
 ```mermaid
 graph TD
     subgraph Ingestion ["Phase 1 — Ingestion (once at startup)"]
-        A["data/*.txt"] --> B["rag/ingestion.py\nwalk + chunk + metadata"]
+        A["data/*.txt, *.pdf"] --> B["rag/ingestion.py\nwalk + chunk + metadata"]
         B --> C["rag/embedder.py\nOllama nomic-embed-text"]
         C --> D["In-Memory Corpus\nNumPy float32"]
     end
@@ -72,7 +72,8 @@ Each pipeline stage is an independent Python module with a single responsibility
 |---|---|---|
 | `rag/_http.py` | Shared Ollama HTTP transport | Ollama (localhost) |
 | `rag/logging_config.py` | Centralized logging configuration | None |
-| `rag/ingestion.py` | Multi-document loading, chunking, and embedding | Ollama `/api/embeddings` |
+| `rag/loaders.py` | Per-format text extraction (.txt, .pdf) | None (.pdf needs `pypdf`) |
+| `rag/ingestion.py` | Multi-document walking, chunking, and embedding | Ollama `/api/embeddings` |
 | `rag/chunker.py` | Word-boundary text segmentation | None |
 | `rag/embedder.py` | Dense vector encoding | Ollama `/api/embeddings` (default) or in-process sentence-transformers |
 | `rag/vector_store.py` | Pluggable similarity index (NumPy / FAISS / Qdrant), with save/load | None |
@@ -263,7 +264,7 @@ data/
 └── audit_controls.txt         ← COSO framework, control testing, findings remediation
 ```
 
-To add documents, drop any `.txt` file into `data/` and restart the application. No code changes required.
+To add documents, drop a `.txt` or `.pdf` file into `data/` and restart the application. No code changes required — `pip install pypdf` first if you haven't (it's commented-optional in `requirements.txt`, since a `.txt`-only corpus doesn't need it). A PDF with no extractable text layer (a scanned image with no OCR) logs a warning and contributes zero chunks rather than failing ingestion.
 
 ---
 
@@ -325,7 +326,7 @@ Copy [`.env.example`](.env.example) to `.env` to set any of these locally — `.
 
 ## ✅ Testing
 
-155 tests across two layers:
+165 tests across two layers:
 
 - **Unit tests** for every pure-function module — chunking, vector search, retrieval,
   schema validation, prompt construction, HTTP config, backend dispatch — including
@@ -481,7 +482,7 @@ The system is designed to be extended without modifying core pipeline logic:
 | **Swap generation model** | Change `GEN_MODEL` constant in `app.py`; no code changes elsewhere |
 | **Add streaming output** | Pass `"stream": true` to `generator.py`; yield tokens progressively |
 | **Add re-ranking** | Insert a cross-encoder step between `retriever.py` and `generator.py` |
-| **Add PDF support** | Extend `rag/ingestion.py` to call `pypdf` before chunking |
+| **Add another document format** | Add a loader function + extension entry to `rag/loaders.py`; `rag/ingestion.py` never changes |
 
 ---
 
@@ -502,13 +503,13 @@ The system is designed to be extended without modifying core pipeline logic:
 
 | Status | Priority | Item | Notes |
 |---|---|---|---|
-| ✅ Done | — | Unit + integration tests, CI | `tests/` (155 tests) + `.github/workflows/ci.yml`, see Testing |
+| ✅ Done | — | Unit + integration tests, CI | `tests/` (165 tests) + `.github/workflows/ci.yml`, see Testing |
 | ✅ Done | High | Persist corpus embeddings | `rag/ingestion.py::ingest(cache_dir=...)` — fingerprinted on content + config, skips re-embedding on a cache hit |
 | ✅ Done | High | Pluggable vector store (NumPy / FAISS / Qdrant) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
 | ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR, hit-rate@k, precision@k against a 15-query golden set. Scoped-down alternative to RAGAS (no LLM judge, no cloud dependency); see `eval/README.md`. **Not yet run** — needs a live Ollama instance |
 | ✅ Done | High | Containerize (Docker) | `Dockerfile` + `docker-compose.yml`, verified end-to-end (real ingestion, retrieval, generation) — see Run With Docker |
 | 🟡 Partial | Medium | Hosted demo | `EMBED_BACKEND=local` / `GEN_BACKEND=anthropic`\|`groq` implemented and tested, see [Hosted / Public Demo](#-hosted--public-demo) — actual deployment to Streamlit Cloud/HF Spaces not yet done |
-| ⬜ | Medium | PDF ingestion | Extend `rag/ingestion.py` with `pypdf`; no pipeline changes needed |
+| ✅ Done | Medium | PDF ingestion | `rag/loaders.py`; drop a `.pdf` into `data/`, `pip install pypdf` (or uncomment it in `requirements.txt`) |
 | ✅ Done | Medium | Integration tests for `service/api.py` / `streamlit_app.py` | FastAPI `TestClient` + Streamlit `AppTest`, ingestion/generation stubbed — see Testing |
 | ⬜ | Medium | Answer-quality evaluation (faithfulness/relevancy) | Requires an LLM judge — local model or cloud API; deliberately deferred, see `eval/README.md` |
 | ⬜ | Low | Streaming token output | Client-side progressive rendering |

@@ -23,6 +23,12 @@ httpx>=0.27.0               # required by fastapi.testclient.TestClient (tests/t
 # local mode — no Qdrant server to run. Uncomment to enable backend="qdrant":
 # qdrant-client>=1.9.0
 
+# Optional — PDF ingestion (rag/loaders.py). Not required for .txt-only
+# corpora; a .pdf file dropped into data/ without this installed fails
+# with a clear ImportError at ingest time, not silently. Uncomment to
+# enable .pdf support:
+# pypdf>=4.2.0
+
 # Optional — EMBED_BACKEND=local (rag/embedder.py). Runs embeddings
 # in-process instead of calling Ollama — needed for hosted demos where a
 # background Ollama server can't run (Streamlit Community Cloud, HF Spaces).

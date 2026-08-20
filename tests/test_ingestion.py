@@ -3,6 +3,7 @@ import pytest
 
 import rag.ingestion as ingestion_module
 from rag.ingestion import ingest
+from tests.conftest import make_minimal_pdf
 
 
 @pytest.fixture
@@ -192,3 +193,36 @@ def test_ingest_cache_roundtrip_with_qdrant_backend(corpus_dir, fake_embed, tmp_
     assert fake_embed["n"] == 1  # cache hit, no re-embedding
     assert chunks1 == chunks2
     assert len(store1) == len(store2)
+
+
+# ── PDF ingestion ─────────────────────────────────────────────────────────
+
+def test_ingest_picks_up_pdf_alongside_txt(corpus_dir, fake_embed):
+    (corpus_dir / "c.pdf").write_bytes(
+        make_minimal_pdf("gamma document about grapes and guavas")
+    )
+
+    chunks, metadata, store = ingest(corpus_dir)
+    sources = {m["source"] for m in metadata}
+    assert sources == {"a.txt", "b.txt", "c.pdf"}
+
+    pdf_chunks = [c for c, m in zip(chunks, metadata) if m["source"] == "c.pdf"]
+    assert any("grapes" in c or "gamma" in c for c in pdf_chunks)
+
+
+def test_ingest_directory_with_only_pdfs(tmp_path, fake_embed):
+    (tmp_path / "only.pdf").write_bytes(make_minimal_pdf("solo pdf document"))
+    chunks, metadata, store = ingest(tmp_path)
+    assert metadata[0]["source"] == "only.pdf"
+    assert "solo pdf document" in chunks[0]
+
+
+def test_ingest_pdf_cache_fingerprint_stable_across_runs(tmp_path, fake_embed):
+    (tmp_path / "doc.pdf").write_bytes(make_minimal_pdf("stable content"))
+    cache_dir = tmp_path / ".cache"
+
+    ingest(tmp_path, cache_dir=cache_dir)
+    assert fake_embed["n"] == 1
+
+    ingest(tmp_path, cache_dir=cache_dir)
+    assert fake_embed["n"] == 1  # unchanged PDF bytes -> same fingerprint -> cache hit
