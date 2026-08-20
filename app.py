@@ -57,7 +57,7 @@ GEN_BACKEND = os.environ.get("GEN_BACKEND") or "ollama"
 _GEN_MODEL_DEFAULTS = {
     "ollama":    "mistral",
     "anthropic": "claude-haiku-4-5-20251001",
-    "groq":      "llama-3.3-70b-versatile",
+    "groq":      "openai/gpt-oss-20b",
 }
 GEN_MODEL = os.environ.get("GEN_MODEL") or _GEN_MODEL_DEFAULTS.get(GEN_BACKEND, "mistral")
 

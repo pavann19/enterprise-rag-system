@@ -42,7 +42,7 @@ log = get_logger(__name__)
 GENERATE_URL            = f"{OLLAMA_HOST}/api/generate"
 DEFAULT_OLLAMA_MODEL    = "mistral"
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
-DEFAULT_GROQ_MODEL      = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_MODEL      = "openai/gpt-oss-20b"
 GEN_BACKEND             = os.environ.get("GEN_BACKEND", "ollama")
 # ──────────────────────────────────────────────────────────────────────────────
 

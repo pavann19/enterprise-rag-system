@@ -74,4 +74,4 @@ def test_explicit_model_override_still_wins():
 def test_model_default_follows_backend_choice():
     _, gen_model, _, gen_backend = _read_config(_base_env(GEN_BACKEND="groq"))
     assert gen_backend == "groq"
-    assert gen_model == "llama-3.3-70b-versatile"
+    assert gen_model == "openai/gpt-oss-20b"

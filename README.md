@@ -315,7 +315,7 @@ GEN_MODEL      = os.environ.get("GEN_MODEL", ...)             # per-backend defa
 | `EMBED_BACKEND` | `ollama` \| `local` | `ollama` | `local` runs sentence-transformers in-process, no server needed |
 | `EMBED_MODEL` | model name | backend-specific | `nomic-embed-text` (ollama) / `all-MiniLM-L6-v2` (local) |
 | `GEN_BACKEND` | `ollama` \| `anthropic` \| `groq` | `ollama` | Cloud backends call their respective hosted API instead of a local model |
-| `GEN_MODEL` | model name | backend-specific | `mistral` (ollama) / `claude-haiku-4-5-20251001` (anthropic) / `llama-3.3-70b-versatile` (groq) |
+| `GEN_MODEL` | model name | backend-specific | `mistral` (ollama) / `claude-haiku-4-5-20251001` (anthropic) / `openai/gpt-oss-20b` (groq) |
 | `ANTHROPIC_API_KEY` | API key | — | Required only when `GEN_BACKEND=anthropic` |
 | `GROQ_API_KEY` | API key | — | Required only when `GEN_BACKEND=groq`. **Never write the key itself into a tracked file** — set it as an actual environment variable, a gitignored `.env`, or your host's secrets manager |
 | `VECTOR_BACKEND` | `numpy` \| `faiss` \| `qdrant` | `numpy` | `faiss`/`qdrant` need their package uncommented in `requirements.txt` |
