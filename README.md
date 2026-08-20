@@ -81,6 +81,7 @@ Each pipeline stage is an independent Python module with a single responsibility
 | `rag/generator.py` | Context-grounded generation | Ollama `/api/generate` (default), Claude API, or Groq API |
 | `validator/json_validator.py` | Output schema enforcement | None |
 | `service/api.py` | FastAPI REST service layer | None |
+| `service/rate_limiter.py` | In-memory per-client rate limiting | None |
 | `app.py` | Pipeline orchestration (CLI) | None |
 
 ### 2. Deterministic Structured Output
@@ -109,7 +110,7 @@ All three backends persist to disk. `rag/ingestion.py::ingest()` accepts a `cach
 
 ### 4. Single Transport Layer
 
-All Ollama API calls are routed through `rag/_http.py::ollama_post()`, with the Ollama host itself read once from the `OLLAMA_HOST` environment variable (default `http://localhost:11434`). This is what lets the exact same code talk to a bare-metal Ollama install or to the `ollama` service in `docker-compose.yml` with no branching — and gives timeout handling and connection-error messages one place to live instead of being duplicated across `embedder.py` and `generator.py`.
+All Ollama API calls are routed through `rag/_http.py::ollama_post()`, with the Ollama host itself read once from the `OLLAMA_HOST` environment variable (default `http://localhost:11434`). This is what lets the exact same code talk to a bare-metal Ollama install or to the `ollama` service in `docker-compose.yml` with no branching — and gives timeout handling, retry-with-backoff on transient failures (`OLLAMA_MAX_RETRIES`, default 2), and connection-error messages one place to live instead of being duplicated across `embedder.py` and `generator.py`.
 
 ---
 
@@ -319,6 +320,9 @@ GEN_MODEL      = os.environ.get("GEN_MODEL", ...)             # per-backend defa
 | `ANTHROPIC_API_KEY` | API key | — | Required only when `GEN_BACKEND=anthropic` |
 | `GROQ_API_KEY` | API key | — | Required only when `GEN_BACKEND=groq`. **Never write the key itself into a tracked file** — set it as an actual environment variable, a gitignored `.env`, or your host's secrets manager |
 | `VECTOR_BACKEND` | `numpy` \| `faiss` \| `qdrant` | `numpy` | `faiss`/`qdrant` need their package uncommented in `requirements.txt` |
+| `EMBED_CONCURRENCY` | integer | `8` | Concurrent embedding requests to Ollama during ingestion — see [Production Scale](#-production-scale) |
+| `OLLAMA_MAX_RETRIES` | integer | `2` | Transient-failure retries per Ollama call (0.5s/1s backoff) — compounds across a large corpus's per-chunk calls, see [Production Scale](#-production-scale) |
+| `RATE_LIMIT_PER_MINUTE` | integer | `30` | Max `POST /query` requests per client IP per minute (`service/api.py`) |
 
 Copy [`.env.example`](.env.example) to `.env` to set any of these locally — `.env` is gitignored, and `docker-compose.yml` reads it automatically.
 
@@ -326,7 +330,7 @@ Copy [`.env.example`](.env.example) to `.env` to set any of these locally — `.
 
 ## ✅ Testing
 
-214 tests, 98% branch coverage (threshold-gated at 96% — see below), across three layers:
+266 tests, 98% branch coverage (threshold-gated at 96% — see below), across three layers:
 
 - **Unit tests** for every pure-function module — chunking, vector search, retrieval,
   schema validation, prompt construction, HTTP config, backend dispatch — including
@@ -373,7 +377,7 @@ reconfiguring stdout/stderr to UTF-8 when not already.
 `eval/run_eval.py` exercises for retrieval), and answer-quality evaluation. See Roadmap.
 
 **On test count specifically:** the target here was coverage of real behavior — every
-branch, every error path, every backend's actual body — not a round number. 214 tests
+branch, every error path, every backend's actual body — not a round number. 266 tests
 at 98% branch coverage is what this codebase's actual surface area produces when
 nothing meaningful is left untested; padding toward an arbitrary count (1,000+) would
 mean either duplicate assertions or testing framework internals instead of this
@@ -418,13 +422,30 @@ curl http://127.0.0.1:8000/health
 ```json
 {
   "status": "ok",
+  "embedding_backend": "ollama",
   "embedding_model": "nomic-embed-text",
+  "generation_backend": "ollama",
   "generation_model": "mistral",
   "documents_loaded": 3
 }
 ```
 
-The health endpoint does not trigger embeddings or LLM calls. It reads in-memory state only.
+`/health` confirms the process is up and the corpus is loaded — it does not trigger
+embeddings or LLM calls, and does not check whether Ollama is actually reachable.
+
+### Readiness check
+
+```bash
+curl http://127.0.0.1:8000/ready
+```
+
+```json
+{"status": "ready", "checked_ollama": true}
+```
+
+Unlike `/health`, this makes a real (cheap) call to confirm the inference backend
+is reachable right now — use it for load-balancer routing decisions, `/health` for
+restart decisions. Returns `503` if Ollama is configured but unreachable.
 
 ### Query
 
@@ -451,8 +472,13 @@ curl -X POST http://127.0.0.1:8000/query \
 | Code | Condition |
 |---|---|
 | `422` | Empty or malformed request body |
-| `503` | Ollama is unreachable at query time |
+| `429` | Rate limit exceeded (`RATE_LIMIT_PER_MINUTE`, default 30/min per client IP) — response includes a `Retry-After` header |
+| `503` | Inference backend is unreachable at query time |
 | `500` | Pipeline output failed schema validation |
+
+Every response carries an `X-Request-ID` header (echoes a caller-supplied one, or
+generates one) — included in every log line for that request, for tracing a
+single call through logs across a multi-instance deployment.
 
 The CLI (`python app.py`) and Streamlit UI (`streamlit run streamlit_app.py`) remain fully independent of the API server.
 
@@ -510,16 +536,95 @@ The system is designed to be extended without modifying core pipeline logic:
 
 ---
 
-## 📊 Operational Characteristics
+## 📈 Production Scale
 
-> **Not yet benchmarked.** The figures below are indicative ranges typical of these model sizes on comparable hardware, not measurements taken from this repository. No benchmark harness or captured run log exists yet — see the Roadmap for the planned evaluation harness. Treat this table as a rough expectation-setter, not a performance claim.
+Everything below is a real measurement — three purpose-built scripts under `eval/`,
+run against a live Ollama instance on this development machine, not projected or
+estimated numbers. Each script's own docstring says how to reproduce it. Sample
+sizes are modest (one machine, one run each) — read these as *evidence a
+mechanism works*, not as capacity-planning guarantees for different hardware.
 
-| Metric | CPU (6-core) | GPU (8 GB VRAM) |
+### Ingestion throughput — `eval/benchmark_scale.py`
+
+The 4-document demo corpus (86 chunks) never exercised anything past trivial
+scale. This generates a synthetic corpus (never touches `data/` or the real
+golden set) and measures real ingestion:
+
+| | Serial (`EMBED_CONCURRENCY=1`) | Concurrent (`EMBED_CONCURRENCY=8`, default) |
 |---|---|---|
-| Embedding latency (per chunk) | ~0.5–2 s | ~0.05–0.2 s |
-| Generation latency (mistral) | ~30–90 s | ~2–8 s |
-| Memory footprint (model + app) | ~4–6 GB RAM | ~4 GB VRAM |
-| Corpus re-embedding required? | Only on document change | Only on document change |
+| 181 chunks | 378.7s (0.48 chunks/sec) | 48.1s (3.76 chunks/sec) — **7.83x** |
+| 1,408 chunks (150 docs) | not run (would be ~49 min at the serial rate above) | 86.9s (16.2 chunks/sec) |
+
+Ollama has no batch-embeddings endpoint — `rag/embedder.py` used to call it once
+per chunk, serially. `EMBED_CONCURRENCY` (default 8) pipelines those requests
+instead. The ~8x speedup roughly tracks the concurrency level, which is expected
+for independent, mostly-I/O-bound requests against one Ollama instance.
+
+At 1,408 chunks, this run also surfaced a real bug: a connection reset mid-stream
+(`http.client.RemoteDisconnected`, raised while reading the response body, not
+while opening the connection) wasn't being caught by the retry logic's
+`except urllib.error.URLError` — only errors while *opening* a connection go
+through that path; a reset while *reading* the body is a bare `OSError`. Fixed
+in `rag/_http.py` (now catches `OSError` too) with a regression test
+reproducing the exact failure shape. Would not have been found without running
+at real scale — the 86-chunk demo corpus never had a request in flight long
+enough to hit it.
+
+### Query latency at scale
+
+Measured against the 1,408-chunk index, split into what actually costs time —
+collapsing this into one "retrieval latency" number would have hidden which
+piece dominates:
+
+| | p50 | p95 | p99 |
+|---|---|---|---|
+| Query embedding (Ollama HTTP round trip) | 55.8ms | 71.1ms | 73.2ms |
+| Vector search (NumPy cosine similarity, in-process) | 4.4ms | 5.9ms | 9.5ms |
+
+The network round trip to Ollama is ~10x the actual search computation, even at
+this size. The `numpy` vector store backend is not the bottleneck here, and
+won't be until the corpus is far larger than anything tested — read that as
+"no evidence FAISS/Qdrant would currently help latency," not "they never would."
+
+### API load test — `eval/load_test.py`
+
+Real concurrent HTTP requests against a running `service/api.py` (not mocked),
+`GEN_MODEL=qwen2.5:0.5b`, 10 concurrent clients, 40 requests:
+
+| | Default (`RATE_LIMIT_PER_MINUTE=30`) | Raised (`RATE_LIMIT_PER_MINUTE=1000`) |
+|---|---|---|
+| Success / failure | 29 / 11 (11 correctly got `429`) | 40 / 0 |
+| Throughput | 1.55 req/s | 1.53 req/s |
+| Latency p50 / p95 / p99 | 6.3s / 8.0s / 8.8s | 6.7s / 7.8s / 7.8s |
+
+Two things this actually shows: the rate limiter enforces its policy correctly
+under real concurrent load (not just in the unit tests that mock time), and the
+sustainable throughput ceiling is set by Ollama serializing generation on one
+model instance, not by anything in the API layer itself — the service handled
+10 concurrent connections cleanly in both runs. Scaling generation throughput
+past this would mean more Ollama capacity (multiple instances, a larger/faster
+model, GPU), not application-layer changes.
+
+### Operational hardening added alongside this
+
+- **Correlation IDs** — every response carries `X-Request-ID` (echoes a
+  caller-supplied one, or generates one), logged with every request for tracing
+  across a multi-instance deployment.
+- **`GET /ready`**, distinct from `/health` — actually checks Ollama
+  reachability (a real `/api/embeddings` call) rather than just confirming the
+  process is up. An orchestrator should restart on failed `/health`, but pull
+  an instance out of load-balancer rotation on failed `/ready` — different
+  signals, deliberately not the same endpoint.
+- **Rate limiting** (`service/rate_limiter.py`) — hand-rolled in-memory
+  fixed-window limiter rather than a dependency, because this is a
+  single-process service (see `docker-compose.yml` — one `api` container, no
+  replicas configured). An in-memory counter is exactly as correct as a
+  distributed one at this scale; it stops being correct the moment this is
+  horizontally scaled, at which point the fix is a shared store, not a bigger
+  local data structure. Said explicitly in the module docstring so it isn't
+  mistaken for more than it is.
+- **Retries with backoff** on every Ollama call (`rag/_http.py`), covering both
+  failure classes found above.
 
 ---
 
@@ -527,7 +632,7 @@ The system is designed to be extended without modifying core pipeline logic:
 
 | Status | Priority | Item | Notes |
 |---|---|---|---|
-| ✅ Done | — | Unit + integration tests, coverage gate, lint gate, CI | `tests/` (214 tests, 98% coverage, 96% threshold) + `.github/workflows/ci.yml`, see Testing |
+| ✅ Done | — | Unit + integration tests, coverage gate, lint gate, CI | `tests/` (266 tests, 98% coverage, 96% threshold) + `.github/workflows/ci.yml`, see Testing |
 | ✅ Done | High | Persist corpus embeddings | `rag/ingestion.py::ingest(cache_dir=...)` — fingerprinted on content + config, skips re-embedding on a cache hit |
 | ✅ Done | High | Pluggable vector store (NumPy / FAISS / Qdrant) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
 | ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR 1.0, hit-rate@1/3/5 all 1.0, precision@5 0.75 on the 15-query golden set (real run, not illustrative — see `eval/README.md` for the honest read on what that does/doesn't prove) |
@@ -535,10 +640,14 @@ The system is designed to be extended without modifying core pipeline logic:
 | 🟡 Partial | Medium | Hosted demo | `EMBED_BACKEND=local` / `GEN_BACKEND=anthropic`\|`groq` implemented and tested, see [Hosted / Public Demo](#-hosted--public-demo) — actual deployment to Streamlit Cloud/HF Spaces not yet done |
 | ✅ Done | Medium | PDF ingestion | `rag/loaders.py`; drop a `.pdf` into `data/`, `pip install pypdf` (or uncomment it in `requirements.txt`) |
 | ✅ Done | Medium | Integration tests for `service/api.py` / `streamlit_app.py` | FastAPI `TestClient` + Streamlit `AppTest`, ingestion/generation stubbed — see Testing |
+| ✅ Done | High | Corpus-scale benchmark | `eval/benchmark_scale.py` — real 1,408-chunk run, 7.83x concurrency speedup, surfaced and fixed a real retry-handling bug — see [Production Scale](#-production-scale) |
+| ✅ Done | High | Rate limiting + request tracing + readiness probe | `service/rate_limiter.py`, `X-Request-ID` middleware, `GET /ready` — see [Production Scale](#-production-scale) |
+| ✅ Done | Medium | Load/performance testing | `eval/load_test.py` — real concurrent requests against a running service, rate limiter verified under load, throughput ceiling identified as Ollama-bound — see [Production Scale](#-production-scale) |
 | ⬜ | Medium | Answer-quality evaluation (faithfulness/relevancy) | Requires an LLM judge — local model or cloud API; deliberately deferred, see `eval/README.md` |
 | ⬜ | Low | Streaming token output | Client-side progressive rendering |
 | ⬜ | Low | Cross-encoder re-ranking | Improved passage precision at the cost of additional latency |
-| ⬜ | Low | Basic auth / rate limiting on `service/api.py` | Only relevant once the API is exposed beyond localhost |
+| ⬜ | Low | Auth on `service/api.py` | Rate limiting now exists; auth (API keys/OAuth) is separate and still open — relevant once the API is exposed beyond localhost |
+| ⬜ | Low | Distributed rate limiting | Current limiter is correct for one process (see its docstring) — needed only if this is ever horizontally scaled |
 
 ---
 

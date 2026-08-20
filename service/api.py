@@ -20,9 +20,12 @@ Or from the project root:
 The existing CLI entry point (app.py) and Streamlit UI are not affected.
 """
 
+import os
+import time
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from app import (
@@ -38,12 +41,20 @@ from app import (
     VECTOR_BACKEND,
     query_pipeline,
 )
+from rag._http import OLLAMA_HOST, ollama_post
 from rag.ingestion import ingest
 from rag.logging_config import get_logger
 from rag.vector_store import VectorStore
+from service.rate_limiter import RateLimiter
 from validator.json_validator import ValidationError
 
 log = get_logger(__name__)
+
+# ── Rate limiting ────────────────────────────────────────────────────────────
+# Applies to /query only — /health and /ready are cheap, no-inference reads
+# meant to be polled freely by orchestrators/load balancers.
+RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "30"))
+_query_rate_limiter = RateLimiter(max_requests=RATE_LIMIT_PER_MINUTE, window_seconds=60)
 
 
 # ── Request / Response models ──────────────────────────────────────────────────
@@ -120,18 +131,44 @@ app = FastAPI(
 )
 
 
+# ── Request correlation ─────────────────────────────────────────────────────
+# Every response carries an X-Request-ID (caller-supplied, if present — lets
+# a caller correlate its own logs with ours — otherwise generated here) so a
+# single request can be traced through logs across a multi-instance
+# deployment without guessing which log line belongs to which call.
+
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    request.state.request_id = request_id
+    start = time.monotonic()
+    response = await call_next(request)
+    duration_ms = round((time.monotonic() - start) * 1000, 1)
+    response.headers["X-Request-ID"] = request_id
+    log.info(
+        "%s %s request_id=%s status=%d duration_ms=%.1f",
+        request.method,
+        request.url.path,
+        request_id,
+        response.status_code,
+        duration_ms,
+    )
+    return response
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 
 @app.get("/health", tags=["ops"])
 def health_check():
     """
-    Liveness probe — confirms the service is running and the corpus is loaded.
+    Liveness probe — confirms the process is running and the corpus is loaded.
 
-    Does NOT trigger embeddings or LLM calls.
+    Does NOT trigger embeddings or LLM calls, and does NOT check whether the
+    inference backend is currently reachable — see GET /ready for that.
     """
     documents_loaded = len({m["source"] for m in _corpus.metadata})
-    log.info("Health check — corpus_chunks=%d documents_loaded=%d", len(_corpus.chunks), documents_loaded)
     return {
         "status": "ok",
         "embedding_backend": EMBED_BACKEND,
@@ -142,8 +179,34 @@ def health_check():
     }
 
 
+@app.get("/ready", tags=["ops"])
+def readiness_check():
+    """
+    Readiness probe — checks whether the configured inference backend is
+    actually reachable right now, not just whether the process is up.
+
+    Distinct from /health on purpose: an orchestrator should keep routing
+    traffic to a live-but-not-yet-ready instance's /health checks (don't
+    restart it), while pulling it out of a load balancer's rotation based
+    on /ready (don't send it requests it can't serve). Only checks Ollama
+    reachability for backend="ollama" — the "local" embedding backend and
+    the cloud generation backends (anthropic/groq) don't have a cheap,
+    side-effect-free reachability check available, so they report ready
+    once the corpus is loaded, same as /health.
+    """
+    if EMBED_BACKEND != "ollama" and GEN_BACKEND != "ollama":
+        return {"status": "ready", "checked_ollama": False}
+
+    try:
+        ollama_post(f"{OLLAMA_HOST}/api/embeddings", {"model": EMBED_MODEL, "prompt": "readiness check"})
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail=f"Ollama not reachable: {exc}") from exc
+
+    return {"status": "ready", "checked_ollama": True}
+
+
 @app.post("/query", tags=["rag"])
-def query(request: QueryRequest):
+def query(request: QueryRequest, http_request: Request):
     """
     Run the full RAG pipeline for a single query.
 
@@ -152,15 +215,31 @@ def query(request: QueryRequest):
     - Generates a context-grounded answer via the configured generation model
     - Returns a validated RAGResponse object
 
+    Rate-limited to RATE_LIMIT_PER_MINUTE requests per client IP (default
+    30/min) — this is the one endpoint that actually costs money/compute
+    per call (embedding + generation), unlike /health and /ready.
+
     Raises:
         422 Unprocessable Entity: if the request body is malformed
+        429 Too Many Requests:    if the caller has exceeded the rate limit
         503 Service Unavailable:  if the inference backend is unreachable at query time
         500 Internal Server Error: if the pipeline output fails schema validation
     """
     if not request.query.strip():
         raise HTTPException(status_code=422, detail="query must not be empty.")
 
-    log.info("POST /query — received query='%.80s…'", request.query)
+    client_key = http_request.client.host if http_request.client else "unknown"
+    if not _query_rate_limiter.allow(client_key):
+        retry_after = _query_rate_limiter.retry_after_seconds(client_key)
+        log.warning("POST /query rate-limited — client=%s retry_after=%.1fs", client_key, retry_after)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded ({RATE_LIMIT_PER_MINUTE}/min). Retry after {retry_after}s.",
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
+
+    request_id = getattr(http_request.state, "request_id", "unknown")
+    log.info("POST /query — request_id=%s query='%.80s…'", request_id, request.query)
     try:
         response = query_pipeline(
             query=request.query,
@@ -174,11 +253,11 @@ def query(request: QueryRequest):
             top_k=TOP_K,
         )
     except ConnectionError as exc:
-        log.error("POST /query failed — inference backend unreachable: %s", exc)
+        log.error("POST /query failed — request_id=%s inference backend unreachable: %s", request_id, exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValidationError as exc:
-        log.error("POST /query failed — validation error: %s", exc)
+        log.error("POST /query failed — request_id=%s validation error: %s", request_id, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    log.info("POST /query complete — answer length %d chars", len(response["answer"]))
+    log.info("POST /query complete — request_id=%s answer_length=%d", request_id, len(response["answer"]))
     return response

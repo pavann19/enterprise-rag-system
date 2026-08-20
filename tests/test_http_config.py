@@ -1,5 +1,6 @@
 import importlib
 import json
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -30,7 +31,8 @@ def test_trailing_slashes_stripped_from_ollama_host(monkeypatch, raw_host):
     importlib.reload(http_module)  # restore real env for subsequent tests
 
 
-def test_ollama_post_raises_connection_error_with_url_in_message():
+def test_ollama_post_raises_connection_error_with_url_in_message(monkeypatch):
+    monkeypatch.setattr(http_module, "_RETRY_BACKOFF_BASE_SEC", 0)
     with pytest.raises(ConnectionError, match="not reachable"):
         http_module.ollama_post("http://localhost:1/api/generate", {"model": "x"}, timeout=2)
 
@@ -73,6 +75,87 @@ def test_ollama_post_raises_runtime_error_on_invalid_json_response():
     with patch("urllib.request.urlopen", return_value=_mock_response(b"not valid json{{{")):
         with pytest.raises(RuntimeError, match="Could not parse"):
             http_module.ollama_post("http://localhost:11434/api/generate", {"model": "x"})
+
+
+def test_ollama_post_retries_transient_failure_then_succeeds(monkeypatch):
+    monkeypatch.setattr(http_module, "_RETRY_BACKOFF_BASE_SEC", 0)  # don't actually sleep in tests
+    payload = {"response": "recovered"}
+    attempts = {"n": 0}
+
+    def _flaky_urlopen(request, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] < 2:
+            raise urllib.error.URLError("connection refused")
+        return _mock_response(json.dumps(payload).encode())
+
+    with patch("urllib.request.urlopen", side_effect=_flaky_urlopen):
+        result = http_module.ollama_post("http://localhost:11434/api/generate", {"model": "x"})
+
+    assert result == payload
+    assert attempts["n"] == 2
+
+
+def test_ollama_post_retries_mid_stream_connection_reset(monkeypatch):
+    # Regression test: a connection reset while reading the response body
+    # (http.client.RemoteDisconnected, a ConnectionResetError/OSError, NOT
+    # a urllib.error.URLError) is a different failure mode than a refused
+    # connection, and was not being retried before — found running the
+    # real scale benchmark against local Ollama under concurrent load.
+    monkeypatch.setattr(http_module, "_RETRY_BACKOFF_BASE_SEC", 0)
+    payload = {"response": "recovered"}
+    attempts = {"n": 0}
+
+    class _FlakyResponse:
+        def __enter__(self):
+            attempts["n"] += 1
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            # Raised here, not in __enter__/urlopen(), to accurately mimic
+            # the real failure: the connection opens fine, the reset
+            # happens while streaming the body.
+            if attempts["n"] < 2:
+                raise ConnectionResetError("Remote end closed connection without response")
+            return json.dumps(payload).encode()
+
+    with patch("urllib.request.urlopen", side_effect=lambda request, timeout=None: _FlakyResponse()):
+        result = http_module.ollama_post("http://localhost:11434/api/generate", {"model": "x"})
+
+    assert result == payload
+    assert attempts["n"] == 2
+
+
+def test_ollama_post_gives_up_after_max_retries(monkeypatch):
+    monkeypatch.setattr(http_module, "_RETRY_BACKOFF_BASE_SEC", 0)
+    monkeypatch.setattr(http_module, "_MAX_RETRIES", 2)
+    attempts = {"n": 0}
+
+    def _always_fails(request, timeout=None):
+        attempts["n"] += 1
+        raise urllib.error.URLError("connection refused")
+
+    with patch("urllib.request.urlopen", side_effect=_always_fails):
+        with pytest.raises(ConnectionError, match="after 3 attempt"):
+            http_module.ollama_post("http://localhost:11434/api/generate", {"model": "x"})
+
+    assert attempts["n"] == 3  # 1 initial + 2 retries
+
+
+def test_ollama_post_does_not_retry_invalid_json():
+    attempts = {"n": 0}
+
+    def _bad_json(request, timeout=None):
+        attempts["n"] += 1
+        return _mock_response(b"not valid json{{{")
+
+    with patch("urllib.request.urlopen", side_effect=_bad_json):
+        with pytest.raises(RuntimeError, match="Could not parse"):
+            http_module.ollama_post("http://localhost:11434/api/generate", {"model": "x"})
+
+    assert attempts["n"] == 1  # malformed JSON is a server-side bug, not transient — no point retrying
 
 
 def test_embedder_and_generator_urls_derive_from_ollama_host(monkeypatch):

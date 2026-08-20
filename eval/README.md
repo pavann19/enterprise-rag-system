@@ -73,3 +73,15 @@ challenge these numbers rather than taking them on faith.
 Add entries to `golden_set.json`: `{"id", "query", "expected_source"}`. Keep each
 query traceable to a specific passage in `data/*.txt` you've actually read — a
 golden label that doesn't match the source content measures nothing.
+
+## Other scripts in this directory
+
+This file covers `run_eval.py` specifically (retrieval *quality*). Two more
+scripts here measure *scale*, not quality — see the main
+[README's Production Scale section](../README.md#-production-scale) for the
+actual measured numbers rather than duplicating them here:
+
+- `benchmark_scale.py` — ingestion throughput and query latency against a
+  synthetic corpus of hundreds of documents (never touches `data/` or this
+  golden set).
+- `load_test.py` — real concurrent HTTP load against a running `service/api.py`.

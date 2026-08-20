@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import service.api as api_module
+from service.rate_limiter import RateLimiter
 from validator.json_validator import ValidationError
 
 FAKE_CHUNKS = ["chunk one text", "chunk two text"]
@@ -25,6 +26,21 @@ class _FakeVectorStore:
 
 def _fake_ingest(**kwargs):
     return FAKE_CHUNKS, FAKE_METADATA, _FakeVectorStore()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limiter(monkeypatch):
+    # _query_rate_limiter is a module-level singleton so its state persists
+    # across the whole pytest session (module imported once) — without
+    # resetting it per test, tests would share a request budget with each
+    # other in whatever order they happen to run, which is exactly the kind
+    # of cross-test coupling that produces flaky failures under
+    # parallelization or when someone adds one more test to this file.
+    monkeypatch.setattr(
+        api_module,
+        "_query_rate_limiter",
+        RateLimiter(max_requests=api_module.RATE_LIMIT_PER_MINUTE, window_seconds=60),
+    )
 
 
 @pytest.fixture
@@ -159,3 +175,102 @@ def test_startup_wraps_connection_error_as_runtime_error(monkeypatch):
     with pytest.raises(RuntimeError, match="embedding backend unreachable"):
         with TestClient(api_module.app):
             pass
+
+
+# ── Request correlation ─────────────────────────────────────────────────────
+
+
+def test_health_response_includes_request_id_header(client):
+    resp = client.get("/health")
+    assert "X-Request-ID" in resp.headers
+    assert len(resp.headers["X-Request-ID"]) > 0
+
+
+def test_caller_supplied_request_id_is_echoed_back(client):
+    resp = client.get("/health", headers={"X-Request-ID": "caller-supplied-id-123"})
+    assert resp.headers["X-Request-ID"] == "caller-supplied-id-123"
+
+
+def test_different_requests_get_different_generated_request_ids(client):
+    id_a = client.get("/health").headers["X-Request-ID"]
+    id_b = client.get("/health").headers["X-Request-ID"]
+    assert id_a != id_b
+
+
+# ── Rate limiting ────────────────────────────────────────────────────────────
+
+
+def test_query_allowed_under_rate_limit(client, monkeypatch):
+    monkeypatch.setattr(
+        api_module, "_query_rate_limiter", api_module.RateLimiter(max_requests=5, window_seconds=60)
+    )
+    fake_response = {"query": "q", "answer": "a", "sources": [{"text": "t", "source": "s"}], "model": "m"}
+    monkeypatch.setattr(api_module, "query_pipeline", lambda **kwargs: fake_response)
+
+    for _ in range(5):
+        resp = client.post("/query", json={"query": "hello"})
+        assert resp.status_code == 200
+
+
+def test_query_returns_429_once_rate_limit_exceeded(client, monkeypatch):
+    monkeypatch.setattr(
+        api_module, "_query_rate_limiter", api_module.RateLimiter(max_requests=2, window_seconds=60)
+    )
+    fake_response = {"query": "q", "answer": "a", "sources": [{"text": "t", "source": "s"}], "model": "m"}
+    monkeypatch.setattr(api_module, "query_pipeline", lambda **kwargs: fake_response)
+
+    client.post("/query", json={"query": "one"})
+    client.post("/query", json={"query": "two"})
+    third = client.post("/query", json={"query": "three"})
+
+    assert third.status_code == 429
+    assert "Retry-After" in third.headers
+    assert "rate limit" in third.json()["detail"].lower()
+
+
+def test_rate_limit_does_not_apply_to_health_or_ready(client, monkeypatch):
+    monkeypatch.setattr(
+        api_module, "_query_rate_limiter", api_module.RateLimiter(max_requests=1, window_seconds=60)
+    )
+    monkeypatch.setattr(api_module, "EMBED_BACKEND", "local")
+    monkeypatch.setattr(api_module, "GEN_BACKEND", "anthropic")
+
+    # exhaust the /query limit
+    fake_response = {"query": "q", "answer": "a", "sources": [{"text": "t", "source": "s"}], "model": "m"}
+    monkeypatch.setattr(api_module, "query_pipeline", lambda **kwargs: fake_response)
+    client.post("/query", json={"query": "one"})
+
+    for _ in range(5):
+        assert client.get("/health").status_code == 200
+        assert client.get("/ready").status_code == 200
+
+
+# ── /ready ───────────────────────────────────────────────────────────────────
+
+
+def test_ready_skips_ollama_check_when_neither_backend_is_ollama(client, monkeypatch):
+    monkeypatch.setattr(api_module, "EMBED_BACKEND", "local")
+    monkeypatch.setattr(api_module, "GEN_BACKEND", "anthropic")
+
+    resp = client.get("/ready")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ready", "checked_ollama": False}
+
+
+def test_ready_returns_200_when_ollama_reachable(client, monkeypatch):
+    monkeypatch.setattr(api_module, "ollama_post", lambda url, payload: {"embedding": [0.1]})
+
+    resp = client.get("/ready")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ready", "checked_ollama": True}
+
+
+def test_ready_returns_503_when_ollama_unreachable(client, monkeypatch):
+    def _raise(url, payload):
+        raise ConnectionError("Ollama is not reachable at http://localhost:11434")
+
+    monkeypatch.setattr(api_module, "ollama_post", _raise)
+
+    resp = client.get("/ready")
+    assert resp.status_code == 503
+    assert "not reachable" in resp.json()["detail"].lower()

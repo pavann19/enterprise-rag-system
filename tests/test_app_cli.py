@@ -75,8 +75,17 @@ def test_cli_prints_ingestion_header_before_failing():
 
 
 @pytest.mark.timeout(30)
-def test_cli_does_not_hang_on_unreachable_backend():
-    # Regression guard: this must fail fast (connection refused), not wait
-    # out a long socket timeout — same class of bug fixed in test_generator.py.
-    result = _run_app([], timeout=15)
+def test_cli_does_not_hang_indefinitely_on_unreachable_backend():
+    # Regression guard: this must fail within a bounded time (connection
+    # refused + retries), not hang out an unbounded/very long socket
+    # timeout — same class of bug originally fixed in test_generator.py.
+    #
+    # 30s, not 15s: rag/_http.py retries each transient connection failure
+    # (2 retries, ~1.5s of backoff each) — correct and desirable for a
+    # single flaky call, but it compounds across the real demo corpus's 86
+    # chunks embedded at concurrency=8 (~11 sequential batches), which is
+    # exactly what this test exercises during a full Ollama outage. ~16.5s
+    # worst case observed; 30s leaves real margin without being "no bound
+    # at all."
+    result = _run_app([], timeout=30)
     assert result.returncode == 1

@@ -194,7 +194,11 @@ def ingest(
         len(doc_files),
     )
 
-    log.info("Embedding corpus — backend='%s' model='%s' …", embed_backend, embed_model)
+    log.info(
+        "Embedding corpus — backend='%s' model='%s' …",
+        embed_backend or "<embedder default>",
+        embed_model or "<embedder default>",
+    )
     corpus_embeddings = embed_texts(all_chunks, model=embed_model, backend=embed_backend)
     vector_store = build_vector_store(corpus_embeddings, backend=backend)
     log.info(

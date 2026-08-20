@@ -25,6 +25,7 @@ side.
 """
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -35,18 +36,35 @@ EMBED_URL = f"{OLLAMA_HOST}/api/embeddings"
 DEFAULT_OLLAMA_MODEL = "nomic-embed-text"
 DEFAULT_LOCAL_MODEL = "all-MiniLM-L6-v2"
 EMBED_BACKEND = os.environ.get("EMBED_BACKEND", "ollama")
+# Ollama's /api/embeddings endpoint takes one prompt per request — there's
+# no batch endpoint to call instead. At corpus scale (hundreds/thousands of
+# chunks), one request at a time is the dominant ingestion cost. Concurrent
+# requests let Ollama pipeline them instead of round-tripping serially —
+# see eval/benchmark_scale.py for the measured before/after. Kept modest by
+# default since a single Ollama instance still serializes on one loaded
+# model; higher concurrency past a point just queues instead of helping.
+EMBED_CONCURRENCY = int(os.environ.get("EMBED_CONCURRENCY", "8"))
 # ──────────────────────────────────────────────────────────────────────────────
 
 _local_model_cache: dict = {}
 
 
 def _embed_texts_ollama(texts: list[str], model: str) -> np.ndarray:
-    vectors: list[list[float]] = []
-    for text in texts:
+    def _embed_one(text: str) -> list[float]:
         response = ollama_post(EMBED_URL, {"model": model, "prompt": text})
         if "embedding" not in response:
             raise RuntimeError(f"Ollama embedding response missing 'embedding' key.\nGot: {response}")
-        vectors.append(response["embedding"])
+        return response["embedding"]
+
+    if len(texts) == 1 or EMBED_CONCURRENCY <= 1:
+        vectors = [_embed_one(t) for t in texts]
+    else:
+        # map() preserves input order in its output regardless of which
+        # worker finishes first — order must match `texts` so the caller
+        # can zip embeddings back to their source chunks.
+        with ThreadPoolExecutor(max_workers=min(EMBED_CONCURRENCY, len(texts))) as pool:
+            vectors = list(pool.map(_embed_one, texts))
+
     return np.array(vectors, dtype=np.float32)
 
 
