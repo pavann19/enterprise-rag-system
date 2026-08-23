@@ -30,3 +30,16 @@ services:
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      # torch/numpy default to one thread per CPU core for BLAS ops: each
+      # thread gets its own working buffers, so on a memory-constrained
+      # free-tier instance (512MB) that multiplies peak RAM during model
+      # load instead of speeding it up (there's no concurrent request load
+      # yet to justify the parallelism). Pinning to 1 trades a slower
+      # single embedding pass for a lower, more predictable memory peak —
+      # the actual bottleneck here is fitting in RAM, not embedding speed.
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: MKL_NUM_THREADS
+        value: "1"
+      - key: TOKENIZERS_PARALLELISM
+        value: "false"
