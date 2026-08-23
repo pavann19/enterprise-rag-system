@@ -503,11 +503,13 @@ curl -N -X POST http://127.0.0.1:8000/query/stream \
 ```
 
 Same pipeline as `/query`, but the generated answer streams back as
-Server-Sent Events — one `data: <token>` line per token, then `data: [DONE]`
-— instead of waiting for the full answer before responding. `streamlit_app.py`
-uses the same underlying `rag.generator.generate_answer_stream()` via
-`st.write_stream` for the same reason: showing tokens as they arrive instead
-of a blank screen for the full generation latency.
+Server-Sent Events: a `data: [SOURCES] <json>` event first (retrieval already
+ran before generation starts, so this comes for free — one call, not two),
+then one `data: <token>` line per generated token, then `data: [DONE]`.
+`streamlit_app.py` uses the same underlying
+`rag.generator.generate_answer_stream()` via `st.write_stream`; the
+[`web/`](web/) frontend consumes the raw SSE response directly — see
+[Web Frontend](#-web-frontend-nextjs).
 
 ### Error codes
 
@@ -524,6 +526,55 @@ generates one) — included in every log line for that request, for tracing a
 single call through logs across a multi-instance deployment.
 
 The CLI (`python app.py`) and Streamlit UI (`streamlit run streamlit_app.py`) remain fully independent of the API server.
+
+---
+
+## 🖥️ Web Frontend (Next.js)
+
+[`web/`](web/) is a second, purpose-built frontend for `service/api.py` —
+Next.js (App Router) + Tailwind, no other UI framework. It exists because
+Streamlit's component model has a real ceiling on visual polish: you can
+inject CSS into it (`streamlit_app.py` does), but you can't get precise
+control over markup, motion, or interaction the way a real frontend gives
+you. `streamlit_app.py` stays in the repo as the zero-setup path (and the
+hosted demo); `web/` is the one built for how the product should actually
+look and feel — plain system fonts, one accent color, content-first layout,
+no chrome that isn't earning its place.
+
+It talks to the same backend everything else in this repo does — no parallel
+API, no duplicated pipeline logic:
+
+- `GET /health` for the corpus-loaded status dot
+- `POST /query/stream` for the actual question flow — the SSE stream's first
+  event is `[SOURCES] <json>` (retrieval already ran before generation starts,
+  so this is free), then answer tokens, then `[DONE]`
+
+### Run it locally
+
+```bash
+# Terminal 1 — the API this frontend calls
+CORS_ALLOWED_ORIGINS=http://localhost:3000 uvicorn service.api:app --reload
+
+# Terminal 2 — the frontend itself
+cd web
+cp .env.local.example .env.local   # NEXT_PUBLIC_API_URL defaults to localhost:8000
+npm install
+npm run dev
+# → http://localhost:3000
+```
+
+`CORS_ALLOWED_ORIGINS` on the API side is required — without it, the browser
+blocks the cross-origin request even though both servers are running
+correctly (see [Configuration](#-configuration)).
+
+### Deploying
+
+`web/` deploys to Vercel (or any Next.js host) independently of the Python
+backend: set `NEXT_PUBLIC_API_URL` to wherever `service/api.py` is actually
+running, and add that Vercel domain to the API's `CORS_ALLOWED_ORIGINS`.
+Nothing about the FastAPI service changes to support this — it's the same
+`/health` and `/query/stream` endpoints the CLI, Streamlit app, and load
+tests already use.
 
 ---
 

@@ -342,6 +342,7 @@ def test_query_stream_returns_tokens_then_done(client, monkeypatch):
     resp = client.post("/query/stream", json={"query": "hello"})
     assert resp.status_code == 200
     body = resp.text
+    assert 'data: [SOURCES] [{"text": "chunk one text", "source": "a.txt"}]' in body
     assert "data: Hello" in body
     assert "data:  world" in body
     assert "data: [DONE]" in body
@@ -406,3 +407,37 @@ def test_query_stream_applies_rerank_when_enabled(client, monkeypatch):
     resp = client.post("/query/stream", json={"query": "hello"})
     assert resp.status_code == 200
     assert captured.get("called") is True
+
+
+# ── CORS ─────────────────────────────────────────────────────────────────────
+
+
+def test_cors_disabled_by_default(monkeypatch):
+    import importlib
+
+    monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+    importlib.reload(api_module)
+    monkeypatch.setattr(api_module, "ingest", _fake_ingest)
+    with TestClient(api_module.app) as c:
+        resp = c.get("/health", headers={"Origin": "http://localhost:3000"})
+    assert "access-control-allow-origin" not in resp.headers
+    importlib.reload(api_module)
+
+
+def test_cors_allows_configured_origin(monkeypatch):
+    import importlib
+
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,https://example.vercel.app")
+    importlib.reload(api_module)
+    monkeypatch.setattr(api_module, "ingest", _fake_ingest)
+    with TestClient(api_module.app) as c:
+        resp = c.options(
+            "/query",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+    assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
+    monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+    importlib.reload(api_module)

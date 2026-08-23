@@ -20,12 +20,14 @@ Or from the project root:
 The existing CLI entry point (app.py) and Streamlit UI are not affected.
 """
 
+import json
 import os
 import time
 import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -149,6 +151,22 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# ── CORS ─────────────────────────────────────────────────────────────────────
+# The Next.js frontend (web/) runs on a different origin (localhost:3000 in
+# dev, its own Vercel domain in production) than this API — a browser blocks
+# that cross-origin fetch by default without this. CORS_ALLOWED_ORIGINS is a
+# comma-separated allowlist, empty by default (no cross-origin access, same
+# as before this existed) rather than "*", since "*" combined with
+# credentialed requests is a real CSRF-adjacent foot-gun.
+_cors_origins = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "X-API-Key", "X-Request-ID"],
+    )
 
 
 # ── Request correlation ─────────────────────────────────────────────────────
@@ -337,7 +355,10 @@ def query_stream(request: QueryRequest, http_request: Request, x_api_key: str | 
         results = rerank(request.query, results)
     passages = [r["text"] for r in results]
 
+    sources_payload = json.dumps([{"text": r["text"], "source": r["source"]} for r in results])
+
     def event_stream():
+        yield f"data: [SOURCES] {sources_payload}\n\n"
         try:
             for token in generate_answer_stream(
                 query=request.query, passages=passages, model=GEN_MODEL, backend=GEN_BACKEND
