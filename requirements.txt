@@ -32,11 +32,13 @@ black>=24.0.0                # format check — see pyproject.toml [tool.black]
 # enable .pdf support:
 # pypdf>=4.2.0
 
-# Optional — EMBED_BACKEND=local (rag/embedder.py). Runs embeddings
-# in-process instead of calling Ollama — needed for hosted demos where a
-# background Ollama server can't run (Streamlit Community Cloud, HF Spaces).
-# Not required for the default EMBED_BACKEND=ollama:
-# sentence-transformers>=3.0.0
+# EMBED_BACKEND=local (rag/embedder.py). Runs embeddings in-process instead
+# of calling Ollama — needed for hosted demos where a background Ollama
+# server can't run (Streamlit Community Cloud, HF Spaces). Not required for
+# the default EMBED_BACKEND=ollama, but uncommented here because
+# streamlit_app.py is deployed with EMBED_BACKEND=local set in that
+# deployment's Secrets — see the Hosted / Public Demo section of README.md.
+sentence-transformers>=3.0.0
 
 # Optional — GEN_BACKEND=anthropic (rag/generator.py). Same hosted-demo
 # motivation as above, for the generation step. Also requires an
@@ -44,13 +46,14 @@ black>=24.0.0                # format check — see pyproject.toml [tool.black]
 # GEN_BACKEND=ollama:
 # anthropic>=0.40.0
 
-# Optional — GEN_BACKEND=groq (rag/generator.py). Free-tier, low-latency
-# hosted inference (Llama models on Groq's own chips). Also requires a
+# GEN_BACKEND=groq (rag/generator.py). Free-tier, low-latency hosted
+# inference (Llama models on Groq's own chips). Also requires a
 # GROQ_API_KEY environment variable — set that in your shell, a gitignored
 # .env file, or your host's secrets manager. Never write the key itself
-# here; requirements.txt is a tracked file. Not required for the default
-# GEN_BACKEND=ollama:
-# groq>=0.11.0
+# here; requirements.txt is a tracked file. Uncommented here for the same
+# reason as sentence-transformers above — this is the hosted demo's actual
+# configured generation backend, not just a documented option.
+groq>=0.11.0
 
 # Ollama is a separate local install, not a pip package:
 # https://ollama.ai/download
