@@ -1,0 +1,32 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# One-click path to a public instance of service/api.py, for the web/
+# frontend (Vercel) to actually call — see the README's Web Frontend
+# section for why that frontend needs a real backend instead of localhost.
+#
+# Uses the existing root Dockerfile (the same image docker-compose.yml
+# builds), not a separate Render-specific build — one image, every
+# deployment target.
+#
+# To deploy: Render dashboard → New → Blueprint → point at this repo.
+# Render finds this file automatically. GROQ_API_KEY and
+# CORS_ALLOWED_ORIGINS are marked sync: false — Render will prompt for
+# them in the dashboard rather than reading a value from here, since a
+# committed file is not where a secret belongs.
+services:
+  - type: web
+    name: enterprise-rag-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh -c "uvicorn service.api:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    plan: free
+    envVars:
+      - key: EMBED_BACKEND
+        value: local
+      - key: GEN_BACKEND
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false

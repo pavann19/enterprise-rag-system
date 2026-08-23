@@ -576,6 +576,30 @@ Nothing about the FastAPI service changes to support this — it's the same
 `/health` and `/query/stream` endpoints the CLI, Streamlit app, and load
 tests already use.
 
+**Hosting the API publicly:** [`render.yaml`](render.yaml) is a Render
+Blueprint that builds the existing root `Dockerfile` (the same image
+`docker-compose.yml` uses) as a free-tier web service — Render can't run a
+background Ollama process, so it's configured for `EMBED_BACKEND=local` +
+`GEN_BACKEND=groq`, the same combo already proven on the Streamlit Cloud
+demo (see [Hosted / Public Demo](#-hosted--public-demo)).
+
+1. Render dashboard → **New** → **Blueprint** → connect this repo. Render
+   finds `render.yaml` automatically.
+2. Render prompts for `GROQ_API_KEY` and `CORS_ALLOWED_ORIGINS` — both are
+   marked `sync: false` in the blueprint specifically so they're entered in
+   Render's dashboard, not committed to this file. Set
+   `CORS_ALLOWED_ORIGINS` to your Vercel domain (e.g.
+   `https://your-app.vercel.app`).
+3. Once deployed, set `NEXT_PUBLIC_API_URL` on the Vercel project to
+   Render's URL (e.g. `https://enterprise-rag-api.onrender.com`) and
+   redeploy the frontend.
+
+Free-tier Render services sleep after inactivity — the first request after
+a period of idle takes longer (cold start + re-embedding the corpus, since
+the free tier has no persistent disk for `rag/ingestion.py`'s cache to
+survive a restart) — expected behavior, not a bug, same caveat as the
+Streamlit Cloud demo's free-tier wake time.
+
 ---
 
 ## 🔎 Observability
