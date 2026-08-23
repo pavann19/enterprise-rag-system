@@ -40,11 +40,150 @@ st.set_page_config(
     layout="centered",
 )
 
+# ── Visual system ────────────────────────────────────────────────────────────
+# A single injected stylesheet, not scattered inline styles — one place to
+# change the palette/type scale. System-font stack (no web-font fetch, so
+# this still renders correctly offline / on a locked-down network) with a
+# restrained accent color and consistent spacing/radius tokens rather than
+# per-element ad-hoc values.
+
+st.markdown(
+    """
+    <style>
+    /*
+     * Streamlit doesn't expose its active theme as CSS custom properties in
+     * this version, and its default theme setting itself follows the OS
+     * light/dark preference — so prefers-color-scheme is the accurate
+     * signal here, not a fallback guess.
+     */
+    :root {
+        --accent: #0a84ff;
+        --accent-soft: rgba(10, 132, 255, 0.12);
+        --ink: #1d1d1f;
+        --ink-soft: rgba(29, 29, 31, 0.62);
+        --hairline: rgba(29, 29, 31, 0.14);
+        --surface: rgba(0, 0, 0, 0.025);
+        --radius: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --accent: #409cff;
+            --accent-soft: rgba(64, 156, 255, 0.16);
+            --ink: #f5f5f7;
+            --ink-soft: rgba(245, 245, 247, 0.64);
+            --hairline: rgba(245, 245, 247, 0.14);
+            --surface: rgba(255, 255, 255, 0.045);
+        }
+    }
+    html, body, [class*="css"] {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+            Inter, Roboto, Helvetica, Arial, sans-serif;
+    }
+    .block-container {
+        max-width: 760px;
+        padding-top: 2.75rem;
+        padding-bottom: 4rem;
+    }
+
+    /* Header */
+    .rag-eyebrow {
+        color: var(--accent);
+        font-weight: 600;
+        font-size: 0.8rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        margin-bottom: 0.35rem;
+    }
+    .rag-title {
+        font-size: 2.1rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--ink);
+        margin: 0 0 0.3rem 0;
+    }
+    .rag-subtitle {
+        color: var(--ink-soft);
+        font-size: 1rem;
+        margin-bottom: 1.75rem;
+    }
+    .rag-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 0.78rem;
+        font-weight: 600;
+        padding: 0.22rem 0.65rem;
+        border-radius: 999px;
+        margin-right: 0.4rem;
+    }
+
+    /* Cards */
+    .rag-card {
+        border: 1px solid var(--hairline);
+        border-radius: var(--radius);
+        padding: 1.4rem 1.5rem;
+        background: var(--surface);
+        margin-bottom: 1.25rem;
+    }
+    .rag-card h4 {
+        margin-top: 0;
+        margin-bottom: 0.65rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--ink);
+    }
+
+    /* Inputs */
+    .stTextInput input {
+        border-radius: 10px !important;
+        border: 1px solid var(--hairline) !important;
+        padding: 0.65rem 0.9rem !important;
+    }
+    .stTextInput input:focus {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px var(--accent-soft) !important;
+    }
+
+    /* Primary button — Apple-style pill, no shouty gradient */
+    .stButton > button[kind="primary"] {
+        background: var(--accent);
+        border: none;
+        border-radius: 999px;
+        padding: 0.55rem 1.6rem;
+        font-weight: 600;
+        box-shadow: none;
+        transition: opacity 0.15s ease;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background: var(--accent);
+        opacity: 0.88;
+    }
+
+    /* Expanders as quiet list rows, not boxed accordions */
+    .streamlit-expanderHeader, [data-testid="stExpander"] summary {
+        border-radius: 10px !important;
+        font-size: 0.92rem !important;
+    }
+    [data-testid="stExpander"] {
+        border: 1px solid var(--hairline) !important;
+        border-radius: 10px !important;
+    }
+
+    hr { border-color: var(--hairline); }
+
+    footer, #MainMenu { visibility: hidden; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.header("⚙️ Configuration")
-    st.caption(f"Embedding backend: `{EMBED_BACKEND}`  ·  Generation backend: `{GEN_BACKEND}`")
+    st.markdown("### Configuration")
+    st.caption(f"Embedding · `{EMBED_BACKEND}`  ·  Generation · `{GEN_BACKEND}`")
     embed_model = st.text_input("Embedding model", value=EMBED_MODEL)
     gen_model = st.text_input("Generation model", value=GEN_MODEL)
     top_k = st.slider("Top-k passages", min_value=1, max_value=10, value=TOP_K)
@@ -56,6 +195,8 @@ with st.sidebar:
         st.caption("Generation uses the Claude API — requires ANTHROPIC_API_KEY.")
     if GEN_BACKEND == "groq":
         st.caption("Generation uses the Groq API — requires GROQ_API_KEY.")
+    if RERANK_ENABLED:
+        st.caption("Cross-encoder re-ranking is enabled.")
 
 # ── Corpus loading (cached so it only runs once) ───────────────────────────────
 
@@ -72,10 +213,20 @@ def load_corpus(data_dir: str, embed_model_key: str, embed_backend_key: str):
     )
 
 
-# ── Main UI ────────────────────────────────────────────────────────────────────
+# ── Header ─────────────────────────────────────────────────────────────────────
 
-st.title("🔍 Enterprise RAG System")
-st.caption(f"Retrieval-Augmented Generation · embed={EMBED_BACKEND} · generate={GEN_BACKEND}")
+st.markdown('<div class="rag-eyebrow">Retrieval-Augmented Generation</div>', unsafe_allow_html=True)
+st.markdown('<div class="rag-title">Enterprise RAG</div>', unsafe_allow_html=True)
+st.markdown(
+    f"""
+    <div class="rag-subtitle">
+        <span class="rag-pill">embed · {EMBED_BACKEND}</span>
+        <span class="rag-pill">generate · {GEN_BACKEND}</span>
+        Ask a question grounded strictly in your own documents.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Load corpus — show a friendly error if the embedding backend is unreachable
 # or misconfigured, or the data dir is empty
@@ -106,13 +257,18 @@ with st.expander(f"📂 Corpus — {len(doc_names)} document(s), {len(chunks)} c
         count = sum(1 for m in metadata if m["source"] == name)
         st.markdown(f"- **{name}** — {count} chunks")
 
+st.write("")
+
 # Query input
 query = st.text_input(
     "Ask a question",
     placeholder="What is the approval threshold for capital expenditures?",
+    label_visibility="collapsed",
 )
 
-if st.button("Ask", type="primary"):
+ask_clicked = st.button("Ask", type="primary")
+
+if ask_clicked:
     if not query.strip():
         st.warning("Please enter a question before clicking Ask.")
     else:
@@ -131,15 +287,18 @@ if st.button("Ask", type="primary"):
                 passages = [r["text"] for r in results]
 
             # ── Answer — streamed token-by-token as it's generated ───────
-            st.subheader("Answer")
-            answer = st.write_stream(
-                generate_answer_stream(
-                    query=query,
-                    passages=passages,
-                    model=gen_model,
-                    backend=GEN_BACKEND,
+            st.markdown("#### Answer")
+            with st.container():
+                st.markdown('<div class="rag-card">', unsafe_allow_html=True)
+                answer = st.write_stream(
+                    generate_answer_stream(
+                        query=query,
+                        passages=passages,
+                        model=gen_model,
+                        backend=GEN_BACKEND,
+                    )
                 )
-            )
+                st.markdown("</div>", unsafe_allow_html=True)
         except ConnectionError as exc:
             if GEN_BACKEND == "ollama":
                 host = str(exc).split("'")[1] if "'" in str(exc) else "http://localhost:11434"
@@ -158,11 +317,11 @@ if st.button("Ask", type="primary"):
             st.warning("The model returned an empty response.")
 
         # ── Source passages ──────────────────────────────────────────────
-        st.subheader("Retrieved Sources")
+        st.markdown("#### Sources")
         for i, r in enumerate(results, start=1):
-            label = f"📄 Source {i} — `{r['source']}`"
+            label = f"📄  {r['source']}"
             with st.expander(label, expanded=(i == 1)):
                 st.caption(r["text"])
 
         # ── Model used ───────────────────────────────────────────────────
-        st.caption(f"Model: `{gen_model}`")
+        st.caption(f"Model · `{gen_model}`")
