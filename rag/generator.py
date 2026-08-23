@@ -30,7 +30,11 @@ Generation is the sole responsibility of this module.
 It expects pre-retrieved context — it does NOT perform retrieval or embedding.
 """
 
+import json
 import os
+import urllib.error
+import urllib.request
+from collections.abc import Iterator
 
 from rag._http import OLLAMA_HOST, ollama_post
 from rag.logging_config import get_logger
@@ -138,10 +142,95 @@ def _generate_groq(prompt: str, model: str) -> str:
     return (response.choices[0].message.content or "").strip()
 
 
+def _stream_ollama(prompt: str, model: str) -> Iterator[str]:
+    """
+    Streams tokens from Ollama's /api/generate as they're produced, instead
+    of blocking for the full response like _generate_ollama. Bypasses
+    ollama_post (which buffers the whole response) — a stream is the one
+    case where that abstraction isn't the right fit.
+    """
+    payload = json.dumps({"model": model, "prompt": prompt, "stream": True}).encode("utf-8")
+    request = urllib.request.Request(
+        f"{GENERATE_URL}",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            for line in response:
+                line = line.strip()
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                token = chunk.get("response", "")
+                if token:
+                    yield token
+                if chunk.get("done"):
+                    break
+    except (urllib.error.URLError, OSError) as exc:
+        raise ConnectionError(f"Could not reach Ollama at '{OLLAMA_HOST}': {exc}") from exc
+
+
+def _stream_anthropic(prompt: str, model: str) -> Iterator[str]:
+    try:
+        import anthropic
+    except ImportError as exc:
+        raise ImportError(
+            "backend='anthropic' requires the anthropic package.\n" "  → pip install anthropic"
+        ) from exc
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("backend='anthropic' requires the ANTHROPIC_API_KEY environment variable.")
+
+    client = anthropic.Anthropic(api_key=api_key)
+    try:
+        with client.messages.stream(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            yield from stream.text_stream
+    except anthropic.APIConnectionError as exc:
+        raise ConnectionError(f"Anthropic API unreachable: {exc}") from exc
+
+
+def _stream_groq(prompt: str, model: str) -> Iterator[str]:
+    try:
+        import groq
+    except ImportError as exc:
+        raise ImportError("backend='groq' requires the groq package.\n" "  → pip install groq") from exc
+
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("backend='groq' requires the GROQ_API_KEY environment variable.")
+
+    client = groq.Groq(api_key=api_key)
+    try:
+        stream = client.chat.completions.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+            stream=True,
+        )
+        for chunk in stream:
+            token = chunk.choices[0].delta.content
+            if token:
+                yield token
+    except groq.APIConnectionError as exc:
+        raise ConnectionError(f"Groq API unreachable: {exc}") from exc
+
+
 _BACKENDS = {
     "ollama": (_generate_ollama, DEFAULT_OLLAMA_MODEL),
     "anthropic": (_generate_anthropic, DEFAULT_ANTHROPIC_MODEL),
     "groq": (_generate_groq, DEFAULT_GROQ_MODEL),
+}
+
+_STREAMING_BACKENDS = {
+    "ollama": _stream_ollama,
+    "anthropic": _stream_anthropic,
+    "groq": _stream_groq,
 }
 
 
@@ -195,3 +284,37 @@ def generate_answer(
 
     log.info("Generation succeeded — answer length %d chars", len(answer))
     return answer
+
+
+def generate_answer_stream(
+    query: str,
+    passages: list[str],
+    model: str = None,
+    backend: str = None,
+) -> Iterator[str]:
+    """
+    Same contract as generate_answer, but yields the answer incrementally as
+    it's generated instead of returning it all at once — for a client that
+    wants to render tokens as they arrive (e.g. streamlit's st.write_stream)
+    instead of waiting out the full generation latency before showing anything.
+
+    Raises the same errors as generate_answer, either immediately (blank
+    query/passages, unknown backend) or lazily on first iteration (network/
+    auth errors — this is a generator, so nothing runs until consumed).
+    """
+    if not query.strip():
+        raise ValueError("query must not be empty.")
+    if not passages:
+        raise ValueError("passages must not be empty.")
+
+    backend = backend or GEN_BACKEND
+    if backend not in _STREAMING_BACKENDS:
+        raise ValueError(f"Unknown generation backend '{backend}'. Available: {sorted(_STREAMING_BACKENDS)}")
+
+    _, default_model = _BACKENDS[backend]
+    model = model or default_model
+    stream_fn = _STREAMING_BACKENDS[backend]
+
+    log.info("Streaming answer — backend='%s' model='%s' query='%.60s…'", backend, model, query)
+    prompt = _build_prompt(query, passages)
+    yield from stream_fn(prompt, model)

@@ -25,7 +25,8 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import (
@@ -42,10 +43,17 @@ from app import (
     query_pipeline,
 )
 from rag._http import OLLAMA_HOST, ollama_post
+from rag.embedder import embed_texts
+from rag.generator import generate_answer_stream
 from rag.ingestion import ingest
 from rag.logging_config import get_logger
+from rag.reranker import RERANK_ENABLED, rerank
+from rag.retriever import retrieve
 from rag.vector_store import VectorStore
-from service.rate_limiter import RateLimiter
+from service.rate_limiter import (  # noqa: F401 — RateLimiter re-exported for tests
+    RateLimiter,
+    get_rate_limiter,
+)
 from validator.json_validator import ValidationError
 
 log = get_logger(__name__)
@@ -54,7 +62,19 @@ log = get_logger(__name__)
 # Applies to /query only — /health and /ready are cheap, no-inference reads
 # meant to be polled freely by orchestrators/load balancers.
 RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "30"))
-_query_rate_limiter = RateLimiter(max_requests=RATE_LIMIT_PER_MINUTE, window_seconds=60)
+_query_rate_limiter = get_rate_limiter(max_requests=RATE_LIMIT_PER_MINUTE, window_seconds=60)
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+# Optional API-key gate on /query. Unset by default (matches every other env
+# var in this service) so a fresh clone still runs with zero config — set
+# RAG_API_KEY once this instance is reachable beyond localhost. /health and
+# /ready stay open on purpose: orchestrators/load balancers poll them
+# without a key.
+RAG_API_KEY = os.environ.get("RAG_API_KEY") or None
+if RAG_API_KEY is None:
+    log.warning(
+        "RAG_API_KEY is not set — POST /query is unauthenticated. Set RAG_API_KEY before exposing this instance beyond localhost."
+    )
 
 
 # ── Request / Response models ──────────────────────────────────────────────────
@@ -206,7 +226,7 @@ def readiness_check():
 
 
 @app.post("/query", tags=["rag"])
-def query(request: QueryRequest, http_request: Request):
+def query(request: QueryRequest, http_request: Request, x_api_key: str | None = Header(default=None)):
     """
     Run the full RAG pipeline for a single query.
 
@@ -215,16 +235,23 @@ def query(request: QueryRequest, http_request: Request):
     - Generates a context-grounded answer via the configured generation model
     - Returns a validated RAGResponse object
 
+    Requires header `X-API-Key` matching the RAG_API_KEY environment variable,
+    if that variable is set (unset = unauthenticated, for local/dev use).
+
     Rate-limited to RATE_LIMIT_PER_MINUTE requests per client IP (default
     30/min) — this is the one endpoint that actually costs money/compute
     per call (embedding + generation), unlike /health and /ready.
 
     Raises:
+        401 Unauthorized:        if RAG_API_KEY is set and the caller's key is missing/wrong
         422 Unprocessable Entity: if the request body is malformed
         429 Too Many Requests:    if the caller has exceeded the rate limit
         503 Service Unavailable:  if the inference backend is unreachable at query time
         500 Internal Server Error: if the pipeline output fails schema validation
     """
+    if RAG_API_KEY is not None and x_api_key != RAG_API_KEY:
+        raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key header.")
+
     if not request.query.strip():
         raise HTTPException(status_code=422, detail="query must not be empty.")
 
@@ -261,3 +288,63 @@ def query(request: QueryRequest, http_request: Request):
 
     log.info("POST /query complete — request_id=%s answer_length=%d", request_id, len(response["answer"]))
     return response
+
+
+def _check_auth_and_rate_limit(request: QueryRequest, http_request: Request, x_api_key: str | None) -> str:
+    """Shared guard for /query and /query/stream. Returns the client key used for rate limiting."""
+    if RAG_API_KEY is not None and x_api_key != RAG_API_KEY:
+        raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key header.")
+    if not request.query.strip():
+        raise HTTPException(status_code=422, detail="query must not be empty.")
+
+    client_key = http_request.client.host if http_request.client else "unknown"
+    if not _query_rate_limiter.allow(client_key):
+        retry_after = _query_rate_limiter.retry_after_seconds(client_key)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded ({RATE_LIMIT_PER_MINUTE}/min). Retry after {retry_after}s.",
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
+    return client_key
+
+
+@app.post("/query/stream", tags=["rag"])
+def query_stream(request: QueryRequest, http_request: Request, x_api_key: str | None = Header(default=None)):
+    """
+    Same pipeline as POST /query, but streams the generated answer as
+    Server-Sent Events instead of waiting for the full answer before
+    responding — the same trade-off streamlit_app.py makes with
+    st.write_stream, exposed over HTTP for any SSE-capable client.
+
+    Retrieval happens eagerly (fast, and the client needs sources up front);
+    only generation is streamed. Emits one `data: <token>` event per
+    generated token, then a final `data: [DONE]` sentinel. Errors that occur
+    after streaming has started (a mid-stream backend disconnect) are sent
+    as a `data: [ERROR] <message>` event, since HTTP status/headers can no
+    longer change once the body has started.
+    """
+    _check_auth_and_rate_limit(request, http_request, x_api_key)
+
+    query_embedding = embed_texts([request.query], model=EMBED_MODEL, backend=EMBED_BACKEND)[0]
+    results = retrieve(
+        query_embedding=query_embedding,
+        vector_store=_corpus.vector_store,
+        chunks=_corpus.chunks,
+        metadata=_corpus.metadata,
+        top_k=TOP_K,
+    )
+    if RERANK_ENABLED:
+        results = rerank(request.query, results)
+    passages = [r["text"] for r in results]
+
+    def event_stream():
+        try:
+            for token in generate_answer_stream(
+                query=request.query, passages=passages, model=GEN_MODEL, backend=GEN_BACKEND
+            ):
+                yield f"data: {token}\n\n"
+        except (ConnectionError, ValueError) as exc:
+            yield f"data: [ERROR] {exc}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

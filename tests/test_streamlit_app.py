@@ -16,7 +16,38 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 import app
+import rag.embedder as embedder_module
+import rag.generator as generator_module
 import rag.ingestion as ingestion_module
+import rag.retriever as retriever_module
+
+FAKE_RETRIEVE_RESULTS = [
+    {"text": "Section 2 text about Tier 2.", "score": 0.9, "source": "financial_policy.txt"}
+]
+
+
+def _patch_query_stream(answer_tokens=None, retrieve_side_effect=None, stream_side_effect=None):
+    """
+    streamlit_app.py's query flow calls embed_texts() -> retrieve() ->
+    generate_answer_stream() directly (not app.query_pipeline, which is
+    only used by the CLI/API — see app.py's query_pipeline docstring).
+    Patches the same three functions the script re-imports fresh on every
+    AppTest.run(), mirroring the ingestion_module.ingest patch pattern above.
+    """
+    embed_patch = patch.object(embedder_module, "embed_texts", return_value=[[0.1, 0.2]])
+    if retrieve_side_effect is not None:
+        retrieve_patch = patch.object(retriever_module, "retrieve", side_effect=retrieve_side_effect)
+    else:
+        retrieve_patch = patch.object(retriever_module, "retrieve", return_value=FAKE_RETRIEVE_RESULTS)
+    if stream_side_effect is not None:
+        stream_patch = patch.object(
+            generator_module, "generate_answer_stream", side_effect=stream_side_effect
+        )
+    else:
+        tokens = ["an answer"] if answer_tokens is None else answer_tokens
+        stream_patch = patch.object(generator_module, "generate_answer_stream", return_value=iter(tokens))
+    return embed_patch, retrieve_patch, stream_patch
+
 
 # AppTest.from_file() resolves a *relative* path against the file that calls
 # it (tests/) in some streamlit versions and against the process CWD in
@@ -79,31 +110,27 @@ def test_asking_empty_query_shows_warning(running_app):
 
 
 def test_asking_a_question_shows_answer_and_sources(running_app):
-    fake_response = {
-        "query": "What is the Tier 2 approval threshold?",
-        "answer": "Tier 2 spending ($5,000-$50,000) requires department head and Finance Business Partner sign-off.",
-        "sources": [{"text": "Section 2 text about Tier 2.", "source": "financial_policy.txt"}],
-        "model": "mistral",
-    }
-    with patch("app.query_pipeline", return_value=fake_response) as mock_pipeline:
+    embed_patch, retrieve_patch, stream_patch = _patch_query_stream(
+        answer_tokens=["Tier 2 spending ($5,000-$50,000) requires ", "Finance Business Partner sign-off."]
+    )
+    with embed_patch, retrieve_patch, stream_patch as mock_stream:
         running_app.text_input[0].input("What is the Tier 2 approval threshold?").run(timeout=30)
         running_app.button[0].click().run(timeout=30)
 
     assert not running_app.exception
-    assert mock_pipeline.called
+    assert mock_stream.called
     body_text = " ".join(md.value for md in running_app.markdown)
-    assert "Tier 2" in body_text or "Finance Business Partner" in body_text
+    assert "Finance Business Partner" in body_text
 
 
-def test_asking_a_question_shows_validation_error(running_app):
-    from validator.json_validator import ValidationError
-
-    with patch("app.query_pipeline", side_effect=ValidationError("bad schema")):
+def test_asking_a_question_shows_empty_response_warning(running_app):
+    embed_patch, retrieve_patch, stream_patch = _patch_query_stream(answer_tokens=[])
+    with embed_patch, retrieve_patch, stream_patch:
         running_app.text_input[0].input("anything").run(timeout=30)
         running_app.button[0].click().run(timeout=30)
 
     assert not running_app.exception
-    assert any("validation error" in e.value.lower() for e in running_app.error)
+    assert any("empty response" in w.value.lower() for w in running_app.warning)
 
 
 def test_missing_data_directory_shows_error_and_stops():
@@ -194,10 +221,10 @@ def test_corpus_load_connection_error_shown_generically_for_non_ollama_backend()
 
 
 def test_ollama_generation_connection_error_shown_with_pull_hint(running_app):
-    with patch(
-        "app.query_pipeline",
-        side_effect=ConnectionError("Ollama is not reachable at 'http://localhost:11434'"),
-    ):
+    embed_patch, retrieve_patch, stream_patch = _patch_query_stream(
+        stream_side_effect=ConnectionError("Ollama is not reachable at 'http://localhost:11434'")
+    )
+    with embed_patch, retrieve_patch, stream_patch:
         running_app.text_input[0].input("anything").run(timeout=30)
         running_app.button[0].click().run(timeout=30)
 
@@ -219,10 +246,10 @@ def test_corpus_load_import_error_shown_for_missing_dependency():
 
 
 def test_non_ollama_generation_connection_error_shown_generically(running_app):
-    with (
-        patch.object(app, "GEN_BACKEND", "groq"),
-        patch("app.query_pipeline", side_effect=ConnectionError("Groq API unreachable: timeout")),
-    ):
+    embed_patch, retrieve_patch, stream_patch = _patch_query_stream(
+        stream_side_effect=ConnectionError("Groq API unreachable: timeout")
+    )
+    with patch.object(app, "GEN_BACKEND", "groq"), embed_patch, retrieve_patch, stream_patch:
         running_app.text_input[0].input("anything").run(timeout=30)
         running_app.button[0].click().run(timeout=30)
 
@@ -231,7 +258,10 @@ def test_non_ollama_generation_connection_error_shown_generically(running_app):
 
 
 def test_generation_import_error_shown_as_misconfiguration(running_app):
-    with patch("app.query_pipeline", side_effect=ImportError("backend='groq' requires the groq package")):
+    embed_patch, retrieve_patch, stream_patch = _patch_query_stream(
+        stream_side_effect=ImportError("backend='groq' requires the groq package")
+    )
+    with embed_patch, retrieve_patch, stream_patch:
         running_app.text_input[0].input("anything").run(timeout=30)
         running_app.button[0].click().run(timeout=30)
 
@@ -240,7 +270,10 @@ def test_generation_import_error_shown_as_misconfiguration(running_app):
 
 
 def test_generation_runtime_error_shown_as_misconfiguration(running_app):
-    with patch("app.query_pipeline", side_effect=RuntimeError("GROQ_API_KEY environment variable")):
+    embed_patch, retrieve_patch, stream_patch = _patch_query_stream(
+        stream_side_effect=RuntimeError("GROQ_API_KEY environment variable")
+    )
+    with embed_patch, retrieve_patch, stream_patch:
         running_app.text_input[0].input("anything").run(timeout=30)
         running_app.button[0].click().run(timeout=30)
 

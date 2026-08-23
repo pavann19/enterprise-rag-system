@@ -19,8 +19,13 @@ it, and at what rank. That's answerable with plain set/rank arithmetic against a
 label, so every number it produces is trustworthy by construction — no separate
 verification step required.
 
-**Answer-quality evaluation (faithfulness, relevancy, hallucination rate) is not
-implemented.** See the main README roadmap.
+**Answer-quality evaluation (faithfulness, relevancy) is implemented** in
+`judge_eval.py`, using whichever GEN_BACKEND is already configured as the
+judge — see that file's docstring for why reusing the existing generation
+backend, rather than adding a second one, was the resolution here. Treat its
+output as **a judge model's opinion**, not ground truth like the rank-based
+metrics above: a small/local judge can misjudge subtle cases, so report
+these numbers as "N answers as scored by <model>", not as verified accuracy.
 
 ## Running it
 
@@ -76,12 +81,14 @@ golden label that doesn't match the source content measures nothing.
 
 ## Other scripts in this directory
 
-This file covers `run_eval.py` specifically (retrieval *quality*). Two more
-scripts here measure *scale*, not quality — see the main
-[README's Production Scale section](../README.md#-production-scale) for the
-actual measured numbers rather than duplicating them here:
+This file covers `run_eval.py` specifically (retrieval *quality*). Three more
+scripts here measure other things:
 
+- `judge_eval.py` — answer *quality* (faithfulness/relevancy) via an LLM
+  judge, see above.
 - `benchmark_scale.py` — ingestion throughput and query latency against a
   synthetic corpus of hundreds of documents (never touches `data/` or this
-  golden set).
+  golden set). See the main
+  [README's Production Scale section](../README.md#-production-scale) for
+  the actual measured numbers rather than duplicating them here.
 - `load_test.py` — real concurrent HTTP load against a running `service/api.py`.

@@ -55,6 +55,12 @@ sentence-transformers>=3.0.0
 # configured generation backend, not just a documented option.
 groq>=0.11.0
 
+# Optional — shared rate-limit store (service/rate_limiter.py) for a
+# horizontally-scaled deployment (multiple api workers/replicas). Not
+# required for a single-process deployment — see get_rate_limiter()'s
+# in-memory fallback. Uncomment and set REDIS_URL to enable:
+# redis>=5.0.0
+
 # Ollama is a separate local install, not a pip package:
 # https://ollama.ai/download
 # ollama pull nomic-embed-text

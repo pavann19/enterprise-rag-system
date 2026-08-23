@@ -50,6 +50,9 @@ services:
       VECTOR_BACKEND: "${VECTOR_BACKEND:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      RAG_API_KEY: "${RAG_API_KEY:-}"
+      REDIS_URL: "${REDIS_URL:-}"
+      RERANK_ENABLED: "${RERANK_ENABLED:-}"
     ports:
       - "8000:8000"
     volumes:
@@ -77,6 +80,7 @@ services:
       VECTOR_BACKEND: "${VECTOR_BACKEND:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      RERANK_ENABLED: "${RERANK_ENABLED:-}"
     ports:
       - "8501:8501"
     volumes:

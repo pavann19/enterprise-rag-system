@@ -25,10 +25,12 @@ from app import (
     GEN_MODEL,
     TOP_K,
     VECTOR_BACKEND,
-    query_pipeline,
 )
+from rag.embedder import embed_texts
+from rag.generator import generate_answer_stream
 from rag.ingestion import ingest
-from validator.json_validator import ValidationError
+from rag.reranker import RERANK_ENABLED, rerank
+from rag.retriever import retrieve
 
 # ── Page config ────────────────────────────────────────────────────────────────
 
@@ -114,46 +116,53 @@ if st.button("Ask", type="primary"):
     if not query.strip():
         st.warning("Please enter a question before clicking Ask.")
     else:
-        with st.spinner("Retrieving and generating…"):
-            try:
-                response = query_pipeline(
-                    query=query,
+        try:
+            with st.spinner("Retrieving passages…"):
+                query_embedding = embed_texts([query], model=embed_model, backend=EMBED_BACKEND)[0]
+                results = retrieve(
+                    query_embedding=query_embedding,
+                    vector_store=vector_store,
                     chunks=chunks,
                     metadata=metadata,
-                    vector_store=vector_store,
-                    gen_model=gen_model,
-                    gen_backend=GEN_BACKEND,
-                    embed_model=embed_model,
-                    embed_backend=EMBED_BACKEND,
                     top_k=top_k,
                 )
-            except ConnectionError as exc:
-                if GEN_BACKEND == "ollama":
-                    host = str(exc).split("'")[1] if "'" in str(exc) else "http://localhost:11434"
-                    st.error(
-                        f"**Ollama is not reachable at `{host}`**\n\n"
-                        f"→ Pull the generation model: `ollama pull {gen_model}`"
-                    )
-                else:
-                    st.error(f"**Generation backend unreachable:** {exc}")
-                st.stop()
-            except (ImportError, RuntimeError) as exc:
-                st.error(f"**Generation backend misconfigured:** {exc}")
-                st.stop()
-            except ValidationError as exc:
-                st.error(f"**Validation error:** {exc}")
-                st.stop()
+                if RERANK_ENABLED:
+                    results = rerank(query, results)
+                passages = [r["text"] for r in results]
 
-        # ── Answer ──────────────────────────────────────────────────────
-        st.subheader("Answer")
-        st.write(response["answer"])
+            # ── Answer — streamed token-by-token as it's generated ───────
+            st.subheader("Answer")
+            answer = st.write_stream(
+                generate_answer_stream(
+                    query=query,
+                    passages=passages,
+                    model=gen_model,
+                    backend=GEN_BACKEND,
+                )
+            )
+        except ConnectionError as exc:
+            if GEN_BACKEND == "ollama":
+                host = str(exc).split("'")[1] if "'" in str(exc) else "http://localhost:11434"
+                st.error(
+                    f"**Ollama is not reachable at `{host}`**\n\n"
+                    f"→ Pull the generation model: `ollama pull {gen_model}`"
+                )
+            else:
+                st.error(f"**Generation backend unreachable:** {exc}")
+            st.stop()
+        except (ImportError, RuntimeError) as exc:
+            st.error(f"**Generation backend misconfigured:** {exc}")
+            st.stop()
+
+        if not answer:
+            st.warning("The model returned an empty response.")
 
         # ── Source passages ──────────────────────────────────────────────
         st.subheader("Retrieved Sources")
-        for i, src in enumerate(response["sources"], start=1):
-            label = f"📄 Source {i} — `{src['source']}`"
+        for i, r in enumerate(results, start=1):
+            label = f"📄 Source {i} — `{r['source']}`"
             with st.expander(label, expanded=(i == 1)):
-                st.caption(src["text"])
+                st.caption(r["text"])
 
         # ── Model used ───────────────────────────────────────────────────
-        st.caption(f"Model: `{response['model']}`")
+        st.caption(f"Model: `{gen_model}`")

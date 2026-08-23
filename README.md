@@ -336,6 +336,9 @@ GEN_MODEL      = os.environ.get("GEN_MODEL", ...)             # per-backend defa
 | `EMBED_CONCURRENCY` | integer | `8` | Concurrent embedding requests to Ollama during ingestion — see [Production Scale](#-production-scale) |
 | `OLLAMA_MAX_RETRIES` | integer | `2` | Transient-failure retries per Ollama call (0.5s/1s backoff) — compounds across a large corpus's per-chunk calls, see [Production Scale](#-production-scale) |
 | `RATE_LIMIT_PER_MINUTE` | integer | `30` | Max `POST /query` requests per client IP per minute (`service/api.py`) |
+| `RAG_API_KEY` | secret string | — (unauthenticated) | Required in the `X-API-Key` header on `POST /query`/`/query/stream` once set — see [API Usage](#-api-usage) |
+| `REDIS_URL` | any Redis URL | — (in-memory limiter) | Shares the rate limit across multiple `api` workers/replicas — see `service/rate_limiter.py` |
+| `RERANK_ENABLED` | `1`/`true` | off | Re-scores retrieved passages with a cross-encoder before generation — see `rag/reranker.py` |
 
 Copy [`.env.example`](.env.example) to `.env` to set any of these locally — `.env` is gitignored, and `docker-compose.yml` reads it automatically.
 
@@ -343,7 +346,7 @@ Copy [`.env.example`](.env.example) to `.env` to set any of these locally — `.
 
 ## ✅ Testing
 
-266 tests, 98% branch coverage (threshold-gated at 96% — see below), across three layers:
+327 tests, 98% branch coverage (threshold-gated at 96% — see below), across three layers:
 
 - **Unit tests** for every pure-function module — chunking, vector search, retrieval,
   schema validation, prompt construction, HTTP config, backend dispatch — including
@@ -386,11 +389,12 @@ defaults non-interactive output to `cp1252`, and the header prints use box-drawi
 Unicode characters — found by the CLI subprocess tests added for this pass, fixed by
 reconfiguring stdout/stderr to UTF-8 when not already.
 
-**Not yet covered:** live integration against a running Ollama instance (that's what
-`eval/run_eval.py` exercises for retrieval), and answer-quality evaluation. See Roadmap.
+**Not yet covered:** live integration against a running Ollama instance — that's what
+`eval/run_eval.py` (retrieval) and `eval/judge_eval.py` (answer quality) exercise
+against a real backend instead.
 
 **On test count specifically:** the target here was coverage of real behavior — every
-branch, every error path, every backend's actual body — not a round number. 266 tests
+branch, every error path, every backend's actual body — not a round number. 327 tests
 at 98% branch coverage is what this codebase's actual surface area produces when
 nothing meaningful is left untested; padding toward an arbitrary count (1,000+) would
 mean either duplicate assertions or testing framework internals instead of this
@@ -398,18 +402,23 @@ project's logic, which is a worse signal, not a better one.
 
 ---
 
-## 📈 Retrieval Evaluation
+## 📈 Retrieval & Answer-Quality Evaluation
 
-`eval/` scores retrieval quality (does the right document come back) against a
-15-query hand-labeled golden set — MRR, hit-rate@k, precision@k. No LLM judge, no
-cloud dependency; see [`eval/README.md`](eval/README.md) for what this does and
-does not measure, why answer-quality metrics (faithfulness, relevancy) are out of
-scope for now, and the actual measured result (MRR 1.0 — read the honest caveats
-there before treating that as more than it is).
+`eval/run_eval.py` scores retrieval quality (does the right document come back)
+against a 15-query hand-labeled golden set — MRR, hit-rate@k, precision@k. No LLM
+judge, no cloud dependency; see [`eval/README.md`](eval/README.md) for what this
+does and does not measure, and the actual measured result (MRR 1.0 — read the
+honest caveats there before treating that as more than it is).
+
+`eval/judge_eval.py` scores the same golden set's real generated answers for
+faithfulness/relevancy, using an LLM judge — see `eval/README.md` for why that's
+whichever `GEN_BACKEND` is already configured, and why to read its output as a
+judge model's opinion, not verified accuracy.
 
 ```bash
 ollama serve
 python -m eval.run_eval
+python -m eval.judge_eval
 ```
 
 ---
@@ -465,6 +474,7 @@ restart decisions. Returns `503` if Ollama is configured but unreachable.
 ```bash
 curl -X POST http://127.0.0.1:8000/query \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: $RAG_API_KEY" \
      -d '{"query": "Explain the audit control policy."}'
 ```
 
@@ -480,10 +490,30 @@ curl -X POST http://127.0.0.1:8000/query \
 }
 ```
 
+The `X-API-Key` header is only required once `RAG_API_KEY` is set (see
+[Configuration](#-configuration)) — unset by default so a fresh clone runs
+with zero config. `/health` and `/ready` never require it.
+
+### Streaming query
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/query/stream \
+     -H "Content-Type: application/json" \
+     -d '{"query": "Explain the audit control policy."}'
+```
+
+Same pipeline as `/query`, but the generated answer streams back as
+Server-Sent Events — one `data: <token>` line per token, then `data: [DONE]`
+— instead of waiting for the full answer before responding. `streamlit_app.py`
+uses the same underlying `rag.generator.generate_answer_stream()` via
+`st.write_stream` for the same reason: showing tokens as they arrive instead
+of a blank screen for the full generation latency.
+
 ### Error codes
 
 | Code | Condition |
 |---|---|
+| `401` | Missing or incorrect `X-API-Key` (only when `RAG_API_KEY` is set) |
 | `422` | Empty or malformed request body |
 | `429` | Rate limit exceeded (`RATE_LIMIT_PER_MINUTE`, default 30/min per client IP) — response includes a `Retry-After` header |
 | `503` | Inference backend is unreachable at query time |
@@ -543,9 +573,9 @@ The system is designed to be extended without modifying core pipeline logic:
 | **Swap to Pinecone/a hosted Qdrant server at scale** | Add a new backend class to `rag/vector_store.py` implementing `search()`/`save()`/`load()` |
 | **Swap embedding model** | Change `EMBED_MODEL` constant in `app.py`; no code changes elsewhere |
 | **Swap generation model** | Change `GEN_MODEL` constant in `app.py`; no code changes elsewhere |
-| **Add streaming output** | Pass `"stream": true` to `generator.py`; yield tokens progressively |
-| **Add re-ranking** | Insert a cross-encoder step between `retriever.py` and `generator.py` |
 | **Add another document format** | Add a loader function + extension entry to `rag/loaders.py`; `rag/ingestion.py` never changes |
+| **Swap the re-ranker model** | Change `DEFAULT_RERANK_MODEL` in `rag/reranker.py` to any HuggingFace cross-encoder |
+| **Shared rate limiting across replicas** | Set `REDIS_URL`; `service/rate_limiter.py::get_rate_limiter()` switches automatically |
 
 ---
 
@@ -656,11 +686,11 @@ model, GPU), not application-layer changes.
 | ✅ Done | High | Corpus-scale benchmark | `eval/benchmark_scale.py` — real 1,408-chunk run, 7.83x concurrency speedup, surfaced and fixed a real retry-handling bug — see [Production Scale](#-production-scale) |
 | ✅ Done | High | Rate limiting + request tracing + readiness probe | `service/rate_limiter.py`, `X-Request-ID` middleware, `GET /ready` — see [Production Scale](#-production-scale) |
 | ✅ Done | Medium | Load/performance testing | `eval/load_test.py` — real concurrent requests against a running service, rate limiter verified under load, throughput ceiling identified as Ollama-bound — see [Production Scale](#-production-scale) |
-| ⬜ | Medium | Answer-quality evaluation (faithfulness/relevancy) | Requires an LLM judge — local model or cloud API; deliberately deferred, see `eval/README.md` |
-| ⬜ | Low | Streaming token output | Client-side progressive rendering |
-| ⬜ | Low | Cross-encoder re-ranking | Improved passage precision at the cost of additional latency |
-| ⬜ | Low | Auth on `service/api.py` | Rate limiting now exists; auth (API keys/OAuth) is separate and still open — relevant once the API is exposed beyond localhost |
-| ⬜ | Low | Distributed rate limiting | Current limiter is correct for one process (see its docstring) — needed only if this is ever horizontally scaled |
+| ✅ Done | Medium | Answer-quality evaluation (faithfulness/relevancy) | `eval/judge_eval.py` — LLM judge reusing whichever `GEN_BACKEND` is already configured, see `eval/README.md` for why and for the "judge's opinion, not ground truth" caveat |
+| ✅ Done | Low | Streaming token output | `rag/generator.py::generate_answer_stream()`, `POST /query/stream` (SSE), `streamlit_app.py` via `st.write_stream` — see [API Usage](#-api-usage) |
+| ✅ Done | Low | Cross-encoder re-ranking | `rag/reranker.py`, opt-in via `RERANK_ENABLED` — re-scores `retrieve()`'s top-k with a cross-encoder before generation |
+| ✅ Done | Low | Auth on `service/api.py` | `RAG_API_KEY` env var gates `POST /query`/`/query/stream` via `X-API-Key` — unauthenticated by default, see [Configuration](#-configuration) |
+| ✅ Done | Low | Distributed rate limiting | `service/rate_limiter.py::get_rate_limiter()` — opt-in `RedisRateLimiter` via `REDIS_URL`, falls back to the in-memory limiter if unset/unreachable |
 
 ---
 

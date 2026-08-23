@@ -274,3 +274,135 @@ def test_ready_returns_503_when_ollama_unreachable(client, monkeypatch):
     resp = client.get("/ready")
     assert resp.status_code == 503
     assert "not reachable" in resp.json()["detail"].lower()
+
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+
+
+def test_query_unauthenticated_when_api_key_unset(client, monkeypatch):
+    monkeypatch.setattr(api_module, "RAG_API_KEY", None)
+    fake_response = {"query": "q", "answer": "a", "sources": [{"text": "t", "source": "s"}], "model": "m"}
+    monkeypatch.setattr(api_module, "query_pipeline", lambda **kwargs: fake_response)
+
+    resp = client.post("/query", json={"query": "hello"})
+    assert resp.status_code == 200
+
+
+def test_query_rejects_missing_api_key_when_configured(client, monkeypatch):
+    monkeypatch.setattr(api_module, "RAG_API_KEY", "secret123")
+    resp = client.post("/query", json={"query": "hello"})
+    assert resp.status_code == 401
+
+
+def test_query_rejects_wrong_api_key(client, monkeypatch):
+    monkeypatch.setattr(api_module, "RAG_API_KEY", "secret123")
+    resp = client.post("/query", json={"query": "hello"}, headers={"X-API-Key": "wrong"})
+    assert resp.status_code == 401
+
+
+def test_query_accepts_correct_api_key(client, monkeypatch):
+    monkeypatch.setattr(api_module, "RAG_API_KEY", "secret123")
+    fake_response = {"query": "q", "answer": "a", "sources": [{"text": "t", "source": "s"}], "model": "m"}
+    monkeypatch.setattr(api_module, "query_pipeline", lambda **kwargs: fake_response)
+
+    resp = client.post("/query", json={"query": "hello"}, headers={"X-API-Key": "secret123"})
+    assert resp.status_code == 200
+
+
+def test_health_and_ready_do_not_require_api_key(client, monkeypatch):
+    monkeypatch.setattr(api_module, "RAG_API_KEY", "secret123")
+    monkeypatch.setattr(api_module, "ollama_post", lambda url, payload: {"embedding": [0.1]})
+    assert client.get("/health").status_code == 200
+    assert client.get("/ready").status_code == 200
+
+
+# ── /query/stream ────────────────────────────────────────────────────────────
+
+
+def test_query_stream_rejects_empty_string(client):
+    resp = client.post("/query/stream", json={"query": "   "})
+    assert resp.status_code == 422
+
+
+def test_query_stream_requires_api_key_when_configured(client, monkeypatch):
+    monkeypatch.setattr(api_module, "RAG_API_KEY", "secret123")
+    resp = client.post("/query/stream", json={"query": "hello"})
+    assert resp.status_code == 401
+
+
+def test_query_stream_returns_tokens_then_done(client, monkeypatch):
+    monkeypatch.setattr(api_module, "embed_texts", lambda texts, model, backend: [[0.1, 0.2]])
+    monkeypatch.setattr(
+        api_module,
+        "retrieve",
+        lambda **kwargs: [{"text": "chunk one text", "score": 0.9, "source": "a.txt"}],
+    )
+    monkeypatch.setattr(api_module, "generate_answer_stream", lambda **kwargs: iter(["Hello", " world"]))
+
+    resp = client.post("/query/stream", json={"query": "hello"})
+    assert resp.status_code == 200
+    body = resp.text
+    assert "data: Hello" in body
+    assert "data:  world" in body
+    assert "data: [DONE]" in body
+
+
+def test_query_stream_emits_error_event_on_connection_error(client, monkeypatch):
+    monkeypatch.setattr(api_module, "embed_texts", lambda texts, model, backend: [[0.1, 0.2]])
+    monkeypatch.setattr(
+        api_module,
+        "retrieve",
+        lambda **kwargs: [{"text": "chunk one text", "score": 0.9, "source": "a.txt"}],
+    )
+
+    def _raise(**kwargs):
+        raise ConnectionError("Ollama is not reachable")
+        yield  # pragma: no cover — makes this a generator function; never reached
+
+    monkeypatch.setattr(api_module, "generate_answer_stream", _raise)
+
+    resp = client.post("/query/stream", json={"query": "hello"})
+    assert resp.status_code == 200
+    assert "data: [ERROR]" in resp.text
+    assert "data: [DONE]" in resp.text
+
+
+def test_query_stream_returns_429_once_rate_limit_exceeded(client, monkeypatch):
+    monkeypatch.setattr(
+        api_module, "_query_rate_limiter", api_module.RateLimiter(max_requests=1, window_seconds=60)
+    )
+    monkeypatch.setattr(api_module, "embed_texts", lambda texts, model, backend: [[0.1, 0.2]])
+    monkeypatch.setattr(
+        api_module,
+        "retrieve",
+        lambda **kwargs: [{"text": "chunk one text", "score": 0.9, "source": "a.txt"}],
+    )
+    monkeypatch.setattr(api_module, "generate_answer_stream", lambda **kwargs: iter(["ok"]))
+
+    client.post("/query/stream", json={"query": "one"})
+    second = client.post("/query/stream", json={"query": "two"})
+
+    assert second.status_code == 429
+    assert "Retry-After" in second.headers
+
+
+def test_query_stream_applies_rerank_when_enabled(client, monkeypatch):
+    monkeypatch.setattr(api_module, "RERANK_ENABLED", True)
+    monkeypatch.setattr(api_module, "embed_texts", lambda texts, model, backend: [[0.1, 0.2]])
+    monkeypatch.setattr(
+        api_module,
+        "retrieve",
+        lambda **kwargs: [{"text": "chunk one text", "score": 0.9, "source": "a.txt"}],
+    )
+    captured = {}
+
+    def _fake_rerank(query, results):
+        captured["called"] = True
+        return results
+
+    monkeypatch.setattr(api_module, "rerank", _fake_rerank)
+    monkeypatch.setattr(api_module, "generate_answer_stream", lambda **kwargs: iter(["ok"]))
+
+    resp = client.post("/query/stream", json={"query": "hello"})
+    assert resp.status_code == 200
+    assert captured.get("called") is True

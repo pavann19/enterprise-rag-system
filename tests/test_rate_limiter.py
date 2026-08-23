@@ -1,8 +1,8 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from service.rate_limiter import RateLimiter
+from service.rate_limiter import RateLimiter, RedisRateLimiter, get_rate_limiter
 
 
 def test_rejects_non_positive_max_requests():
@@ -76,3 +76,100 @@ def test_retry_after_seconds_zero_once_window_fully_elapsed():
         limiter.allow("client-a")
     with patch("time.monotonic", return_value=1000.0 + 90):
         assert limiter.retry_after_seconds("client-a") == 0.0
+
+
+# ── RedisRateLimiter ─────────────────────────────────────────────────────────
+
+
+def test_redis_limiter_rejects_non_positive_args():
+    with pytest.raises(ValueError):
+        RedisRateLimiter(MagicMock(), max_requests=0, window_seconds=60)
+    with pytest.raises(ValueError):
+        RedisRateLimiter(MagicMock(), max_requests=5, window_seconds=0)
+
+
+def test_redis_limiter_allows_under_limit():
+    client = MagicMock()
+    client.incr.return_value = 1
+    limiter = RedisRateLimiter(client, max_requests=3, window_seconds=60)
+    assert limiter.allow("client-a") is True
+    client.expire.assert_called_once_with("ratelimit:client-a", 60)
+
+
+def test_redis_limiter_rejects_over_limit():
+    client = MagicMock()
+    client.incr.return_value = 4
+    limiter = RedisRateLimiter(client, max_requests=3, window_seconds=60)
+    assert limiter.allow("client-a") is False
+
+
+def test_redis_limiter_only_sets_expiry_on_first_request():
+    client = MagicMock()
+    client.incr.return_value = 2
+    limiter = RedisRateLimiter(client, max_requests=3, window_seconds=60)
+    limiter.allow("client-a")
+    client.expire.assert_not_called()
+
+
+def test_redis_limiter_retry_after_seconds():
+    client = MagicMock()
+    client.ttl.return_value = 42
+    limiter = RedisRateLimiter(client, max_requests=3, window_seconds=60)
+    assert limiter.retry_after_seconds("client-a") == 42.0
+
+
+def test_redis_limiter_retry_after_seconds_zero_when_no_ttl():
+    client = MagicMock()
+    client.ttl.return_value = -2
+    limiter = RedisRateLimiter(client, max_requests=3, window_seconds=60)
+    assert limiter.retry_after_seconds("client-a") == 0.0
+
+
+# ── get_rate_limiter ─────────────────────────────────────────────────────────
+
+
+def test_get_rate_limiter_returns_in_memory_when_no_redis_url(monkeypatch):
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    limiter = get_rate_limiter(max_requests=5, window_seconds=60)
+    assert isinstance(limiter, RateLimiter)
+
+
+def test_get_rate_limiter_falls_back_when_redis_package_missing(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
+    monkeypatch.setitem(__import__("sys").modules, "redis", None)
+    limiter = get_rate_limiter(max_requests=5, window_seconds=60)
+    assert isinstance(limiter, RateLimiter)
+
+
+def test_get_rate_limiter_falls_back_when_redis_unreachable(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
+    fake_redis_module = MagicMock()
+    fake_client = MagicMock()
+
+    class _FakeRedisError(Exception):
+        pass
+
+    fake_redis_module.exceptions.RedisError = _FakeRedisError
+    fake_client.ping.side_effect = _FakeRedisError("connection refused")
+    fake_redis_module.Redis.from_url.return_value = fake_client
+
+    monkeypatch.setitem(__import__("sys").modules, "redis", fake_redis_module)
+    limiter = get_rate_limiter(max_requests=5, window_seconds=60)
+    assert isinstance(limiter, RateLimiter)
+
+
+def test_get_rate_limiter_returns_redis_limiter_when_reachable(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
+    fake_redis_module = MagicMock()
+    fake_client = MagicMock()
+    fake_client.ping.return_value = True
+
+    class _FakeRedisError(Exception):
+        pass
+
+    fake_redis_module.exceptions.RedisError = _FakeRedisError
+    fake_redis_module.Redis.from_url.return_value = fake_client
+
+    monkeypatch.setitem(__import__("sys").modules, "redis", fake_redis_module)
+    limiter = get_rate_limiter(max_requests=5, window_seconds=60)
+    assert isinstance(limiter, RedisRateLimiter)

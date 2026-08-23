@@ -130,6 +130,19 @@ def test_query_pipeline_propagates_validation_error_on_malformed_output(fixed_pi
             )
 
 
+def test_query_pipeline_applies_rerank_when_enabled(fixed_pipeline_mocks):
+    reranked = [{"text": "passage two", "score": 0.8, "rerank_score": 0.99, "source": "b.txt"}]
+    with patch.object(app, "RERANK_ENABLED", True), patch("app.rerank", return_value=reranked) as mock_rerank:
+        response = app.query_pipeline(
+            query="q",
+            chunks=["passage one", "passage two"],
+            metadata=[{"source": "a.txt"}, {"source": "b.txt"}],
+            vector_store=_FakeVectorStore(),
+        )
+    mock_rerank.assert_called_once()
+    assert response["sources"] == [{"text": "passage two", "source": "b.txt"}]
+
+
 def test_query_pipeline_top_k_forwarded_to_retrieve(fixed_pipeline_mocks):
     app.query_pipeline(
         query="q",

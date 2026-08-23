@@ -28,6 +28,7 @@ from pathlib import Path
 from rag.embedder import embed_texts
 from rag.generator import generate_answer
 from rag.ingestion import ingest
+from rag.reranker import RERANK_ENABLED, rerank
 from rag.retriever import retrieve
 from rag.vector_store import VectorStore
 from validator.json_validator import RAGResponse, ValidationError, validate
@@ -121,6 +122,9 @@ def query_pipeline(
         top_k=top_k,
     )
     # results: [{"text": str, "score": float, "source": str}, ...]
+
+    if RERANK_ENABLED:
+        results = rerank(query, results)
 
     passages = [r["text"] for r in results]
 
