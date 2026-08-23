@@ -2,6 +2,9 @@
 
 [![CI](https://github.com/pavann19/enterprise-rag-system/actions/workflows/ci.yml/badge.svg)](https://github.com/pavann19/enterprise-rag-system/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://enterprise-rag-system-p.streamlit.app/)
+
+**🔗 Live demo: [enterprise-rag-system-p.streamlit.app](https://enterprise-rag-system-p.streamlit.app/)** — running `EMBED_BACKEND=local` + `GEN_BACKEND=groq` (see [Hosted / Public Demo](#-hosted--public-demo)). No setup, no cloning — click and ask a question.
 
 A modular, deterministic Retrieval-Augmented Generation (RAG) pipeline built to power enterprise Financial Planning & Analysis (FP&A) workflows. Designed for seamless backend integration, this system extracts, synthesizes, and enforces structured insights from complex financial documents, policy manuals, and operational reports.
 
@@ -202,6 +205,15 @@ model.
 
 ## ☁️ Hosted / Public Demo
 
+**Live: [enterprise-rag-system-p.streamlit.app](https://enterprise-rag-system-p.streamlit.app/)**
+— deployed on Streamlit Community Cloud, `EMBED_BACKEND=local` +
+`GEN_BACKEND=groq`. Verified working end-to-end (2026-08-23): asking *"What is
+the approval threshold for Tier 3 capital expenditures?"* returns *"Above
+$50,000"*, correctly grounded in the retrieved `financial_policy.txt` passage.
+The empty-query warning and corpus-summary panel also confirmed working live,
+not just in tests. Free-tier hosting — if it's asleep when you click it,
+Streamlit's wake screen takes it a few seconds to spin back up.
+
 The default configuration (`EMBED_BACKEND=ollama`, `GEN_BACKEND=ollama`) can't
 be reached by someone clicking a public link — free hosting platforms like
 Streamlit Community Cloud or Hugging Face Spaces don't let you run a
@@ -235,13 +247,14 @@ deploy on Streamlit Community Cloud:
    — they're listed there already, commented out — uncomment the ones you need
    for this deployment.
 
-**Not yet done:** no instance of this has actually been deployed from this
-repository — the backend code and its error paths are unit-tested (see
-`tests/test_embedder_backends.py`, `tests/test_generator_backends.py`), and
-the `local` embedding backend has been run manually end-to-end, but the steps
-above describing the Streamlit Cloud deploy itself have not been executed.
-Deploying requires your own Streamlit Cloud / HF Spaces account and API key,
-so that last step is yours to run.
+These are the actual steps used for the live deployment linked above — not a
+hypothetical. `requirements.txt` has `sentence-transformers` and `groq`
+uncommented (not `faiss-cpu`, `qdrant-client`, `pypdf`, or `anthropic` — this
+deployment doesn't use those). One thing worth knowing if you fork this:
+`sentence-transformers` pulls in `torch`, which noticeably slows down both the
+Streamlit Cloud build and this repo's own CI (`lint`/`test` jobs went from
+~30s to ~2min once it was added) — worth it for a working public demo, but
+not free.
 
 ---
 
@@ -637,7 +650,7 @@ model, GPU), not application-layer changes.
 | ✅ Done | High | Pluggable vector store (NumPy / FAISS / Qdrant) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
 | ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR 1.0, hit-rate@1/3/5 all 1.0, precision@5 0.75 on the 15-query golden set (real run, not illustrative — see `eval/README.md` for the honest read on what that does/doesn't prove) |
 | ✅ Done | High | Containerize (Docker) | `Dockerfile` + `docker-compose.yml`, verified end-to-end (real ingestion, retrieval, generation) — see Run With Docker |
-| 🟡 Partial | Medium | Hosted demo | `EMBED_BACKEND=local` / `GEN_BACKEND=anthropic`\|`groq` implemented and tested, see [Hosted / Public Demo](#-hosted--public-demo) — actual deployment to Streamlit Cloud/HF Spaces not yet done |
+| ✅ Done | High | Hosted demo | **Live:** [enterprise-rag-system-p.streamlit.app](https://enterprise-rag-system-p.streamlit.app/) — verified working end-to-end, see [Hosted / Public Demo](#-hosted--public-demo) |
 | ✅ Done | Medium | PDF ingestion | `rag/loaders.py`; drop a `.pdf` into `data/`, `pip install pypdf` (or uncomment it in `requirements.txt`) |
 | ✅ Done | Medium | Integration tests for `service/api.py` / `streamlit_app.py` | FastAPI `TestClient` + Streamlit `AppTest`, ingestion/generation stubbed — see Testing |
 | ✅ Done | High | Corpus-scale benchmark | `eval/benchmark_scale.py` — real 1,408-chunk run, 7.83x concurrency speedup, surfaced and fixed a real retry-handling bug — see [Production Scale](#-production-scale) |
