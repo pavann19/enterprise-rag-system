@@ -26,3 +26,26 @@ npm run dev
 No state management library, no component library, no CSS-in-JS — the
 surface area here is small enough that plain React state and Tailwind
 utility classes are the right amount of tooling.
+
+## Testing
+
+Vitest + React Testing Library, 30 tests, 100% line/function coverage:
+
+```bash
+npm test              # run once
+npm run test:watch    # watch mode
+npm run test:coverage # with a coverage report
+```
+
+- `src/lib/api.test.ts` — the SSE parser (`streamAnswer`): the `[SOURCES]`
+  preamble, tokens split across chunk boundaries, `[ERROR]`/`[DONE]`
+  sentinels, auth headers, non-JSON error bodies
+- `src/components/HealthBadge.test.tsx` — checking/online/offline states,
+  singular vs. plural document count, no state update after unmount
+- `src/app/page.test.tsx` — the query flow: streaming, errors, the
+  empty-response warning, Clear resetting state
+- `src/app/layout.test.tsx` — renders children, exports metadata
+
+Runs in CI (`.github/workflows/ci.yml`'s `web` job) alongside lint and a
+production build — a broken frontend fails the same way a broken backend
+does, not silently.

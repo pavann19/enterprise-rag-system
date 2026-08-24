@@ -27,15 +27,20 @@ export default function Home() {
     setSources([]);
     setError(null);
 
+    let receivedToken = false;
     try {
       await streamAnswer(
         trimmed,
         {
           onSources: setSources,
-          onToken: (token) => setAnswer((prev) => prev + token),
+          onToken: (token) => {
+            receivedToken = true;
+            setAnswer((prev) => prev + token);
+          },
         },
         controller.signal,
       );
+      if (!receivedToken) setError("The model returned an empty response.");
       setPhase("done");
     } catch (err) {
       if (controller.signal.aborted) return;

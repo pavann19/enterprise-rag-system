@@ -801,7 +801,7 @@ model, GPU), not application-layer changes.
 | ✅ Done | Low | Distributed rate limiting | `service/rate_limiter.py::get_rate_limiter()` — opt-in `RedisRateLimiter` via `REDIS_URL`, falls back to the in-memory limiter if unset/unreachable |
 | ✅ Done | High | Production-grade web frontend | `web/` (Next.js + Tailwind) — see [Web Frontend](#-web-frontend-nextjs) for why it exists alongside `streamlit_app.py` |
 | ✅ Done | High | Public deployment of `service/api.py` | Render (`render.yaml`), CORS via `CORS_ALLOWED_ORIGINS` — **Live:** [enterprise-rag-api-n7fb.onrender.com](https://enterprise-rag-api-n7fb.onrender.com) |
-| ⬜ | Low | Tests for `web/` | `service/`, `rag/`, etc. have 327 Python tests at 98% coverage; the Next.js frontend currently has none |
+| ✅ Done | Low | Tests for `web/` | Vitest + React Testing Library, 30 tests, 100% line/function coverage — see [`web/README.md`](web/README.md#testing), runs in CI |
 
 ---
 
