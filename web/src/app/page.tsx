@@ -12,6 +12,7 @@ export default function Home() {
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Source[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [wakingUp, setWakingUp] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   async function ask(question: string) {
@@ -26,6 +27,14 @@ export default function Home() {
     setAnswer("");
     setSources([]);
     setError(null);
+    setWakingUp(false);
+
+    // The API's free-tier host sleeps after inactivity — a cold start can
+    // take 15-20s before the first token arrives. Anything slower than a
+    // couple of seconds gets an explanation instead of a silent spinner,
+    // per the same transparency principle the empty-response warning
+    // follows: never leave someone guessing whether it's broken.
+    const wakeTimer = setTimeout(() => setWakingUp(true), 3000);
 
     let receivedToken = false;
     try {
@@ -46,6 +55,9 @@ export default function Home() {
       if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setPhase("error");
+    } finally {
+      clearTimeout(wakeTimer);
+      setWakingUp(false);
     }
   }
 
@@ -88,6 +100,12 @@ export default function Home() {
           {isBusy ? "Asking…" : "Ask"}
         </button>
       </form>
+
+      {wakingUp && (
+        <p className="animate-fade-up mt-2 text-[13px] text-ink-tertiary">
+          The backend runs on a free tier that sleeps when idle — waking it up, this can take up to 20s.
+        </p>
+      )}
 
       <div className="mt-3 flex items-center justify-between">
         <HealthBadge />

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Home from "./page";
 import * as api from "@/lib/api";
@@ -18,6 +18,7 @@ describe("Home page — query flow", () => {
     stubHealthPending();
   });
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -136,5 +137,49 @@ describe("Home page — query flow", () => {
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     await waitFor(() => expect(screen.getByText(/empty response/i)).toBeInTheDocument());
+  });
+
+  it("shows the waking-up hint after 3s of no tokens, and clears it once one arrives", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let sendToken: (() => void) | undefined;
+    vi.spyOn(api, "streamAnswer").mockImplementation(
+      (_q, handlers) =>
+        new Promise((resolve) => {
+          sendToken = () => {
+            handlers.onToken("ok");
+            resolve();
+          };
+        }),
+    );
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<Home />);
+    await user.type(screen.getByPlaceholderText(/approval threshold/i), "hi");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    expect(screen.queryByText(/sleeps when idle/i)).not.toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(screen.getByText(/sleeps when idle/i)).toBeInTheDocument();
+
+    await act(async () => {
+      sendToken?.();
+    });
+    expect(screen.queryByText(/sleeps when idle/i)).not.toBeInTheDocument();
+  });
+
+  it("does not show the waking-up hint once the answer resolves quickly", async () => {
+    vi.spyOn(api, "streamAnswer").mockImplementation(async (_q, handlers) => {
+      handlers.onToken("fast answer");
+    });
+
+    const user = userEvent.setup();
+    render(<Home />);
+    await user.type(screen.getByPlaceholderText(/approval threshold/i), "hi");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await waitFor(() => expect(screen.getByText("fast answer")).toBeInTheDocument());
+    expect(screen.queryByText(/sleeps when idle/i)).not.toBeInTheDocument();
   });
 });
