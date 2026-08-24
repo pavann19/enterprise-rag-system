@@ -4,7 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://enterprise-rag-system-p.streamlit.app/)
 
-**🔗 Live demo: [enterprise-rag-system-p.streamlit.app](https://enterprise-rag-system-p.streamlit.app/)** — running `EMBED_BACKEND=local` + `GEN_BACKEND=groq` (see [Hosted / Public Demo](#-hosted--public-demo)). No setup, no cloning — click and ask a question.
+**🔗 Live demo (Streamlit): [enterprise-rag-system-p.streamlit.app](https://enterprise-rag-system-p.streamlit.app/)** — running `EMBED_BACKEND=local` + `GEN_BACKEND=groq` (see [Hosted / Public Demo](#-hosted--public-demo)). No setup, no cloning — click and ask a question.
+
+**🔗 Live demo (Next.js): [temporary-fleet-reef-xif8tiz.vercel.app](https://temporary-fleet-reef-xif8tiz.vercel.app/)** — the same backend behind a purpose-built frontend instead of Streamlit's component model; see [Web Frontend](#-web-frontend-nextjs) for why it exists and how it's deployed.
 
 A modular, deterministic Retrieval-Augmented Generation (RAG) pipeline built to power enterprise Financial Planning & Analysis (FP&A) workflows. Designed for seamless backend integration, this system extracts, synthesizes, and enforces structured insights from complex financial documents, policy manuals, and operational reports.
 
@@ -600,6 +602,37 @@ the free tier has no persistent disk for `rag/ingestion.py`'s cache to
 survive a restart) — expected behavior, not a bug, same caveat as the
 Streamlit Cloud demo's free-tier wake time.
 
+**Live:** [temporary-fleet-reef-xif8tiz.vercel.app](https://temporary-fleet-reef-xif8tiz.vercel.app/)
+(Vercel) → [enterprise-rag-api-n7fb.onrender.com](https://enterprise-rag-api-n7fb.onrender.com)
+(Render), verified end-to-end (2026-08-24): asking the same capital-expenditure
+question the Streamlit demo answers returns the same correctly grounded answer,
+streamed token-by-token with sources attached.
+
+Two real deploy-time bugs surfaced getting this live, neither of which showed
+up in local dev — worth knowing if you fork this into your own monorepo:
+
+- **Vercel Root Directory.** This repo has `web/` as a subdirectory, not the
+  repo root — Vercel's default project config assumes the root *is* the
+  Next.js app, so the first deploy failed with "No Next.js version detected."
+  Fixed in Project Settings → Build and Deployment → Root Directory → `web`.
+- **CORS exact-match on a trailing slash.** `CORS_ALLOWED_ORIGINS` was set to
+  `https://your-app.vercel.app/` (copied straight from the browser's address
+  bar, trailing slash included) — but a browser's `Origin` header never has
+  one, so `CORSMiddleware`'s exact-match check silently rejected every
+  request. No error in Render's logs either, since the request was reaching
+  the server fine; the browser was the one blocking the response. Fixed by
+  removing the trailing slash.
+
+A third, pre-deploy fix worth calling out separately since it's a real
+resource-constraint finding, not a config typo: `torch`/`sentence-transformers`
+default to one BLAS thread per CPU core, which multiplies peak memory during
+model load rather than helping — on Render's 512MB free tier this caused a
+genuine OOM crash-loop during corpus embedding (visible in the logs as
+`Embedding corpus...` followed by a fresh `Started server process` every
+couple of minutes, never reaching `Ingestion complete`). Fixed by pinning
+`OMP_NUM_THREADS`/`MKL_NUM_THREADS` to `1` and disabling tokenizers'
+parallelism — see `render.yaml`.
+
 ---
 
 ## 🔎 Observability
@@ -766,6 +799,9 @@ model, GPU), not application-layer changes.
 | ✅ Done | Low | Cross-encoder re-ranking | `rag/reranker.py`, opt-in via `RERANK_ENABLED` — re-scores `retrieve()`'s top-k with a cross-encoder before generation |
 | ✅ Done | Low | Auth on `service/api.py` | `RAG_API_KEY` env var gates `POST /query`/`/query/stream` via `X-API-Key` — unauthenticated by default, see [Configuration](#-configuration) |
 | ✅ Done | Low | Distributed rate limiting | `service/rate_limiter.py::get_rate_limiter()` — opt-in `RedisRateLimiter` via `REDIS_URL`, falls back to the in-memory limiter if unset/unreachable |
+| ✅ Done | High | Production-grade web frontend | `web/` (Next.js + Tailwind) — see [Web Frontend](#-web-frontend-nextjs) for why it exists alongside `streamlit_app.py` |
+| ✅ Done | High | Public deployment of `service/api.py` | Render (`render.yaml`), CORS via `CORS_ALLOWED_ORIGINS` — **Live:** [enterprise-rag-api-n7fb.onrender.com](https://enterprise-rag-api-n7fb.onrender.com) |
+| ⬜ | Low | Tests for `web/` | `service/`, `rag/`, etc. have 327 Python tests at 98% coverage; the Next.js frontend currently has none |
 
 ---
 

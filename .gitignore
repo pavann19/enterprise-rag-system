@@ -30,6 +30,10 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Claude Code local dev config (preview server definitions, etc.) —
+# machine-specific, not part of the product
+.claude/
+
 # Numpy saved arrays (generated at runtime)
 *.npy
 *.npz
