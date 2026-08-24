@@ -348,7 +348,7 @@ Copy [`.env.example`](.env.example) to `.env` to set any of these locally — `.
 
 ## ✅ Testing
 
-327 tests, 98% branch coverage (threshold-gated at 96% — see below), across three layers:
+343 tests, 98% branch coverage (threshold-gated at 96% — see below), across four layers:
 
 - **Unit tests** for every pure-function module — chunking, vector search, retrieval,
   schema validation, prompt construction, HTTP config, backend dispatch — including
@@ -356,6 +356,14 @@ Copy [`.env.example`](.env.example) to `.env` to set any of these locally — `.
   unicode, zero-overlap, malformed schemas, missing dependencies/API keys) and, for
   each cloud/local backend, both the dispatch logic *and* the real client-construction/
   response-parsing body (mocked SDK, not bypassed) — not just the happy path.
+- **Property-based tests** (Hypothesis) for `rag/chunker.py` and
+  `validator/json_validator.py` — the two modules where "every hand-picked
+  example passes" is the weakest guarantee, since the input space (arbitrary
+  text; arbitrary combinations of missing/wrong-typed fields) is exactly
+  where example-based tests under-sample. These assert invariants (no word
+  is ever silently dropped across chunk boundaries; `validate()` never
+  returns something that violates its own schema) across hundreds of
+  generated cases per test, not one fixed scenario.
 - **Integration tests** for every entry point — `service/api.py` via FastAPI's
   `TestClient` (routing, request validation, lifespan startup errors, HTTP status
   mapping), `streamlit_app.py` via Streamlit's `AppTest` harness (full script
@@ -396,7 +404,7 @@ reconfiguring stdout/stderr to UTF-8 when not already.
 against a real backend instead.
 
 **On test count specifically:** the target here was coverage of real behavior — every
-branch, every error path, every backend's actual body — not a round number. 327 tests
+branch, every error path, every backend's actual body — not a round number. 343 tests
 at 98% branch coverage is what this codebase's actual surface area produces when
 nothing meaningful is left untested; padding toward an arbitrary count (1,000+) would
 mean either duplicate assertions or testing framework internals instead of this
