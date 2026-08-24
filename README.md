@@ -6,7 +6,7 @@
 
 **🔗 Live demo (Streamlit): [enterprise-rag-system-p.streamlit.app](https://enterprise-rag-system-p.streamlit.app/)** — running `EMBED_BACKEND=local` + `GEN_BACKEND=groq` (see [Hosted / Public Demo](#-hosted--public-demo)). No setup, no cloning — click and ask a question.
 
-**🔗 Live demo (Next.js): [temporary-fleet-reef-xif8tiz.vercel.app](https://temporary-fleet-reef-xif8tiz.vercel.app/)** — the same backend behind a purpose-built frontend instead of Streamlit's component model; see [Web Frontend](#-web-frontend-nextjs) for why it exists and how it's deployed. Its API runs on Render's free tier, which sleeps after inactivity — the first question after a while asleep takes ~15-20s longer (cold start + re-embedding the corpus) before it starts streaming.
+**🔗 Live demo (Next.js): [enterprise-rag-system-pavann19.vercel.app](https://enterprise-rag-system-pavann19.vercel.app/)** — the same backend behind a purpose-built frontend instead of Streamlit's component model; see [Web Frontend](#-web-frontend-nextjs) for why it exists and how it's deployed. Its API runs on Render's free tier, which sleeps after inactivity — the first question after a while asleep takes ~15-20s longer (cold start + re-embedding the corpus) before it starts streaming.
 
 A modular, deterministic Retrieval-Augmented Generation (RAG) pipeline built to power enterprise Financial Planning & Analysis (FP&A) workflows. Designed for seamless backend integration, this system extracts, synthesizes, and enforces structured insights from complex financial documents, policy manuals, and operational reports.
 
@@ -610,7 +610,7 @@ the free tier has no persistent disk for `rag/ingestion.py`'s cache to
 survive a restart) — expected behavior, not a bug, same caveat as the
 Streamlit Cloud demo's free-tier wake time.
 
-**Live:** [temporary-fleet-reef-xif8tiz.vercel.app](https://temporary-fleet-reef-xif8tiz.vercel.app/)
+**Live:** [enterprise-rag-system-pavann19.vercel.app](https://enterprise-rag-system-pavann19.vercel.app/)
 (Vercel) → [enterprise-rag-api-n7fb.onrender.com](https://enterprise-rag-api-n7fb.onrender.com)
 (Render), verified end-to-end (2026-08-24): asking the same capital-expenditure
 question the Streamlit demo answers returns the same correctly grounded answer,
