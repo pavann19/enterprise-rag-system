@@ -1,4 +1,4 @@
-# Enterprise RAG System — FP&A Platform Edition
+# Retrieval-Augmented Generation Service
 
 [![CI](https://github.com/pavann19/enterprise-rag-system/actions/workflows/ci.yml/badge.svg)](https://github.com/pavann19/enterprise-rag-system/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -348,7 +348,7 @@ Copy [`.env.example`](.env.example) to `.env` to set any of these locally — `.
 
 ## ✅ Testing
 
-343 tests, 98% branch coverage (threshold-gated at 96% — see below), across four layers:
+343 Python tests, 98% branch coverage (threshold-gated at 96% — see below), across four layers:
 
 - **Unit tests** for every pure-function module — chunking, vector search, retrieval,
   schema validation, prompt construction, HTTP config, backend dispatch — including
@@ -791,7 +791,7 @@ model, GPU), not application-layer changes.
 
 | Status | Priority | Item | Notes |
 |---|---|---|---|
-| ✅ Done | — | Unit + integration tests, coverage gate, lint gate, CI | `tests/` (266 tests, 98% coverage, 96% threshold) + `.github/workflows/ci.yml`, see Testing |
+| ✅ Done | — | Unit + integration tests, coverage gate, lint gate, CI | `tests/` (343 Python tests, 98% coverage, 96% threshold) + `.github/workflows/ci.yml`, see Testing |
 | ✅ Done | High | Persist corpus embeddings | `rag/ingestion.py::ingest(cache_dir=...)` — fingerprinted on content + config, skips re-embedding on a cache hit |
 | ✅ Done | High | Pluggable vector store (NumPy / FAISS / Qdrant) | `rag/vector_store.py`; swap via `VECTOR_BACKEND`, `retrieve()` interface unchanged |
 | ✅ Done | High | Retrieval evaluation harness | `eval/` — MRR 1.0, hit-rate@1/3/5 all 1.0, precision@5 0.75 on the 15-query golden set (real run, not illustrative — see `eval/README.md` for the honest read on what that does/doesn't prove) |
