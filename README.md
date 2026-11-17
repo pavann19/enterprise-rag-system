@@ -611,7 +611,7 @@ survive a restart) — expected behavior, not a bug, same caveat as the
 Streamlit Cloud demo's free-tier wake time.
 
 **Live:** [enterprise-rag-system-pavann19.vercel.app](https://enterprise-rag-system-pavann19.vercel.app/)
-(Vercel) → [enterprise-rag-api-n7fb.onrender.com](https://enterprise-rag-api-n7fb.onrender.com)
+(Vercel) → hosted API demo currently unavailable
 (Render), verified end-to-end (2026-08-24): asking the same capital-expenditure
 question the Streamlit demo answers returns the same correctly grounded answer,
 streamed token-by-token with sources attached.
@@ -808,7 +808,7 @@ model, GPU), not application-layer changes.
 | ✅ Done | Low | Auth on `service/api.py` | `RAG_API_KEY` env var gates `POST /query`/`/query/stream` via `X-API-Key` — unauthenticated by default, see [Configuration](#-configuration) |
 | ✅ Done | Low | Distributed rate limiting | `service/rate_limiter.py::get_rate_limiter()` — opt-in `RedisRateLimiter` via `REDIS_URL`, falls back to the in-memory limiter if unset/unreachable |
 | ✅ Done | High | Production-grade web frontend | `web/` (Next.js + Tailwind) — see [Web Frontend](#-web-frontend-nextjs) for why it exists alongside `streamlit_app.py` |
-| ✅ Done | High | Public deployment of `service/api.py` | Render (`render.yaml`), CORS via `CORS_ALLOWED_ORIGINS` — **Live:** [enterprise-rag-api-n7fb.onrender.com](https://enterprise-rag-api-n7fb.onrender.com) |
+| ✅ Done | High | Public deployment of `service/api.py` | Render (`render.yaml`), CORS via `CORS_ALLOWED_ORIGINS` — **Live:** hosted API demo currently unavailable |
 | ✅ Done | Low | Tests for `web/` | Vitest + React Testing Library, 30 tests, 100% line/function coverage — see [`web/README.md`](web/README.md#testing), runs in CI |
 
 ---
