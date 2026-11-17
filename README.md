@@ -711,7 +711,7 @@ golden set) and measures real ingestion:
 
 | | Serial (`EMBED_CONCURRENCY=1`) | Concurrent (`EMBED_CONCURRENCY=8`, default) |
 |---|---|---|
-| 181 chunks | 378.7s (0.48 chunks/sec) | 48.1s (3.76 chunks/sec) — **7.83x** |
+| 181 chunks | 378.7s (0.48 chunks/sec) | 48.1s (3.76 chunks/sec) — **7.87x** |
 | 1,408 chunks (150 docs) | not run (would be ~49 min at the serial rate above) | 86.9s (16.2 chunks/sec) |
 
 Ollama has no batch-embeddings endpoint — `rag/embedder.py` used to call it once
@@ -799,7 +799,7 @@ model, GPU), not application-layer changes.
 | ✅ Done | High | Hosted demo | **Live:** [enterprise-rag-system-p.streamlit.app](https://enterprise-rag-system-p.streamlit.app/) — verified working end-to-end, see [Hosted / Public Demo](#-hosted--public-demo) |
 | ✅ Done | Medium | PDF ingestion | `rag/loaders.py`; drop a `.pdf` into `data/`, `pip install pypdf` (or uncomment it in `requirements.txt`) |
 | ✅ Done | Medium | Integration tests for `service/api.py` / `streamlit_app.py` | FastAPI `TestClient` + Streamlit `AppTest`, ingestion/generation stubbed — see Testing |
-| ✅ Done | High | Corpus-scale benchmark | `eval/benchmark_scale.py` — real 1,408-chunk run, 7.83x concurrency speedup, surfaced and fixed a real retry-handling bug — see [Production Scale](#-production-scale) |
+| ✅ Done | High | Corpus-scale benchmark | `eval/benchmark_scale.py` — real 1,408-chunk run, 7.87x concurrency speedup, surfaced and fixed a real retry-handling bug — see [Production Scale](#-production-scale) |
 | ✅ Done | High | Rate limiting + request tracing + readiness probe | `service/rate_limiter.py`, `X-Request-ID` middleware, `GET /ready` — see [Production Scale](#-production-scale) |
 | ✅ Done | Medium | Load/performance testing | `eval/load_test.py` — real concurrent requests against a running service, rate limiter verified under load, throughput ceiling identified as Ollama-bound — see [Production Scale](#-production-scale) |
 | ✅ Done | Medium | Answer-quality evaluation (faithfulness/relevancy) | `eval/judge_eval.py` — LLM judge reusing whichever `GEN_BACKEND` is already configured, see `eval/README.md` for why and for the "judge's opinion, not ground truth" caveat |
